@@ -1,6 +1,6 @@
 # Feature Contract — Family Expenses
 
-**Status:** ACTIVE (v0.2.0 — standalone-repo architecture)
+**Status:** ACTIVE (v0.3.0 — auth minimized per owner threat model)
 **Owner:** matt-debate
 **Repo:** `matt-debate/test` (to be renamed `family-expenses`)
 **Branch:** `claude/family-expenses-setup-8uvrks`
@@ -77,13 +77,16 @@ pattern, minus tenancy/scoping.
 
 ## 5. Access model
 
-- One bookmarkable link per token: `/t/<token>`. Operator mints tokens via the
-  MCP tool `expenses_mint_link` or `scripts/mint_link.py` (resolves prior
-  verification finding **M2**: minting is an explicit, operator-only,
-  first-class capability). No self-serve minting.
-- Every API request revalidates the token (revoked + expiry, fail-closed).
-- MCP access is separate: protected by Cloud Run/OAuth deployment config, not
-  by portal tokens.
+- One bookmarkable link per token: `/t/<token>`, minted via the MCP tool
+  `expenses_mint_link` or `scripts/mint_link.py` (M2). No self-serve minting.
+- **Links never expire by default** (owner decision 2026-07-14: the holder is
+  non-technical and will not renew credentials; revocation is the kill
+  switch). Bounded expiry remains available per token.
+- Every API request revalidates the token (revoked + expiry-if-set,
+  fail-closed on unknown/garbage tokens).
+- **MCP gate is optional**: `MCP_SECRET` set → bearer enforced; unset → open.
+  Accepted threat model (owner, 2026-07-14): unguessable URLs, no personal
+  data beyond a household ledger, worst-case edit = an inflated month.
 
 ## 6. API contract (portal)
 
@@ -108,9 +111,16 @@ commit-on-success / rollback-on-error.
 ## 7. MCP surface (operator)
 
 Tools on the Cloud Run streamable-HTTP MCP: `expenses_list`,
-`expenses_summary`, `expenses_add`, `expenses_mark_paid`,
-`expenses_mint_link`. Same store as the portal, so history/atomicity rules
+`expenses_summary`, `expenses_add`, `expenses_update`, `expenses_mark_paid`,
+`expenses_delete`, `expenses_history`, `expenses_mint_link`,
+`expenses_revoke_link`. Same store as the portal, so history/atomicity rules
 apply identically.
+
+**Natural-speech design (primary requirement):** mutating tools accept a
+fuzzy `query` instead of an id (one match acts; several return candidates;
+mark-paid prefers the unpaid match); dates default to today in `APP_TZ`
+(default Asia/Shanghai); amounts tolerate ¥/块/元/comma forms; server
+instructions coach LLM clients with bilingual example utterances.
 
 ## 8. UI
 
@@ -126,9 +136,13 @@ mark paid" with date, paid/unpaid filter, running totals.
   never mutated.
 - **A3** Operator can list/summarize/mark-paid/mint from an MCP client.
 - **A4** `paid=true` without `paid_date` rejected at DB CHECK and API layer.
-- **A5** Expired/revoked/unknown tokens rejected on every request.
+- **A5** Revoked/unknown tokens rejected on every request; expiry enforced
+  only for tokens minted with one.
 - **A6** Test suite runs green in CI **without** a live Postgres (sqlite), and
   the schema applies cleanly to Postgres.
+- **A7** Single casual utterances (中文 or EN) — add with spoken amount and no
+  date, mark-paid by description — succeed via MCP without ids; ambiguous
+  phrases return candidates rather than acting on a guess.
 
 ## 10. Versioning & docs
 

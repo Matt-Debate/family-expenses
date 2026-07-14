@@ -3,6 +3,36 @@
 Semantic versioning. Unreleased work accumulates under [Unreleased] and is cut
 to a release entry when a chunk set ships.
 
+## [0.3.0] — 2026-07-14
+Auth scaled back to the owner's explicit threat model (low-stakes household
+ledger, zero-tech user, unguessable URLs); MCP reworked for natural speech.
+
+### Changed
+- **Portal links never expire by default** (`expires_at` nullable; NULL =
+  never). The holder never renews anything; revocation stays the kill switch.
+  Bounded expiry still available via `expires_days`.
+- **MCP bearer is now optional**: `MCP_SECRET` set → enforced (401 on
+  mismatch); unset → `/mcp` is open (was fail-closed 503).
+- `expenses_add`/`mark_paid` dates optional — default **today in `APP_TZ`**
+  (default `Asia/Shanghai`), not UTC.
+- Amounts tolerate spoken/pasted forms: `¥300`, `300块`, `1,200元`, `300 rmb`.
+
+### Added
+- **Natural-language targeting**: `expenses_mark_paid` / `expenses_update` /
+  `expenses_delete` accept a fuzzy `query` ("足球课") instead of an id —
+  one match acts (mark-paid prefers the unpaid match), several matches return
+  candidates for the assistant to disambiguate; zero matches return a hint.
+- New MCP tools `expenses_update` and `expenses_delete`; `expenses_list`
+  gains a `query` text filter. Tool count now 9.
+- Server instructions coach LLM clients: bilingual example utterances,
+  defaults, confirm-before-delete, reply in the user's language.
+- `store.find()`, `today_str()`; runbook §4 "what you (or she) can say".
+
+### Tests
+- Suite 37 → **51** (natural-speech flows, ambiguity, never-expire tokens,
+  open/gated middleware) — all green; live MCP smoke re-run in open mode
+  covering the full conversational flow end-to-end.
+
 ## [0.2.0] — 2026-07-14
 First complete implementation (chunks 1–5), ready for first deploy.
 

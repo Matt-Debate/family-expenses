@@ -4,3 +4,4 @@ mcp>=1.12,<2
 starlette>=0.40
 uvicorn>=0.30
 psycopg[binary]>=3.1
+tzdata>=2024.1  # zoneinfo data for APP_TZ "today" defaults on slim images

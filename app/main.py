@@ -6,7 +6,9 @@ Layout:
 
 Config (env):
   DATABASE_URL  postgres://… (Neon) — falls back to a local sqlite file
-  MCP_SECRET    required for /mcp to serve (fail-closed otherwise)
+  MCP_SECRET    optional: when set, /mcp requires the bearer header;
+                when unset, /mcp is open (owner-accepted threat model)
+  APP_TZ        household timezone for "today" defaults (default Asia/Shanghai)
   PORT, HOST    Cloud Run injects PORT (default 8080)
 """
 

@@ -46,12 +46,14 @@ CREATE INDEX IF NOT EXISTS idx_expense_history_expense
   ON expense_history(expense_id, seq);
 
 -- Bookmarkable household links (pattern adapted from work-dashboards
--- portal_tokens, minus tenancy/scoping).
+-- portal_tokens, minus tenancy/scoping). expires_at NULL = never expires —
+-- the household default; the holder never renews anything. Revocation is the
+-- kill switch.
 CREATE TABLE IF NOT EXISTS access_tokens (
   id            TEXT PRIMARY KEY,
   token         TEXT NOT NULL UNIQUE,
   label         TEXT,
-  expires_at    TEXT NOT NULL,
+  expires_at    TEXT,
   revoked       BOOLEAN NOT NULL DEFAULT FALSE,
   created_at    TEXT NOT NULL,
   last_used_at  TEXT,

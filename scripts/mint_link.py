@@ -23,7 +23,8 @@ from app.store import Store  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--label", help="who this link is for (e.g. 'wife')")
-    parser.add_argument("--days", type=int, default=120, help="expiry in days (1-365)")
+    parser.add_argument("--days", type=int, default=None,
+                        help="expiry in days (default: never expires)")
     parser.add_argument("--base-url", default="", help="service URL to print a full link")
     parser.add_argument("--list", action="store_true", help="list existing tokens")
     parser.add_argument("--revoke", metavar="TOKEN_OR_ID", help="revoke a token")
@@ -34,7 +35,9 @@ def main() -> int:
 
     if args.list:
         for row in store.list_tokens():
-            state = "REVOKED" if row["revoked"] else f"expires {row['expires_at']}"
+            state = ("REVOKED" if row["revoked"]
+                     else f"expires {row['expires_at']}" if row["expires_at"]
+                     else "never expires")
             print(f"{row['id']}  {row['label'] or '-':12s}  {state}  "
                   f"used {row['use_count']}x (last {row['last_used_at'] or 'never'})")
         return 0
@@ -46,7 +49,7 @@ def main() -> int:
 
     minted = store.mint_token(label=args.label, expires_days=args.days)
     print(f"token:      {minted['token']}")
-    print(f"expires_at: {minted['expires_at']}")
+    print(f"expires_at: {minted['expires_at'] or 'never'}")
     if args.base_url:
         print(f"link:       {args.base_url.rstrip('/')}/t/{minted['token']}")
     return 0

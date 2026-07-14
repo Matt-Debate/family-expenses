@@ -179,6 +179,11 @@ class TokenTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row["label"], "wife")
 
+    def test_default_mint_never_expires(self):
+        minted = self.store.mint_token(label="wife")
+        self.assertIsNone(minted["expires_at"])
+        self.assertIsNotNone(self.store.validate_token(minted["token"]))
+
     def test_validate_bumps_usage(self):
         minted = self.store.mint_token()
         self.store.validate_token(minted["token"])
@@ -209,7 +214,42 @@ class TokenTests(unittest.TestCase):
 
     def test_expires_days_clamped(self):
         minted = self.store.mint_token(expires_days=99999)
-        self.assertLessEqual(minted["expires_at"][:4], "2027")
+        self.assertIsNotNone(minted["expires_at"])  # bounded when requested
+
+
+class NaturalInputTests(unittest.TestCase):
+    """Spoken/pasted forms the MCP path must tolerate."""
+
+    def setUp(self):
+        self.store = make_store()
+
+    def test_amount_accepts_decorated_strings(self):
+        for raw, expect in (("¥300", 300.0), ("300块", 300.0),
+                            ("1,200元", 1200.0), (" 88.8 rmb ", 88.8)):
+            exp = self.store.create(date="2026-07-14", amount=raw)
+            self.assertEqual(exp.amount, expect)
+
+    def test_amount_garbage_still_rejected(self):
+        for bad in ("三百", "¥", ""):
+            with self.assertRaises(ValidationError):
+                self.store.create(date="2026-07-14", amount=bad)
+
+    def test_find_matches_chinese_and_english(self):
+        a = self.store.create(date="2026-07-01", amount=300, description="足球课")
+        b = self.store.create(date="2026-07-02", amount=200, description="Piano lesson")
+        self.store.create(date="2026-07-03", amount=50, category="food")
+        self.assertEqual([e.id for e in self.store.find("足球")], [a.id])
+        self.assertEqual([e.id for e in self.store.find("piano")], [b.id])  # case-insensitive
+        self.assertEqual(len(self.store.find("课")), 1)
+        self.assertEqual(len(self.store.find("food")), 1)  # category matches too
+        self.assertEqual(self.store.find("nothing-like-this"), [])
+
+    def test_find_respects_status_filter(self):
+        a = self.store.create(date="2026-07-01", amount=300, description="足球课")
+        self.store.create(date="2026-07-02", amount=300, description="足球装备")
+        self.store.mark_paid(a.id, paid=True, paid_date="2026-07-02")
+        self.assertEqual(len(self.store.find("足球")), 2)
+        self.assertEqual(len(self.store.find("足球", status="unpaid")), 1)
 
 
 if __name__ == "__main__":

@@ -39,6 +39,27 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def today_str() -> str:
+    """Today's date in the household's timezone (APP_TZ, default China).
+
+    Server clocks run UTC; a family in China adding an expense after
+    08:00 CST would otherwise get 'yesterday'.
+    """
+    import os
+
+    tz_name = os.environ.get("APP_TZ", "Asia/Shanghai")
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+# tolerated decoration around spoken/pasted amounts: ¥300, 300块, 1,200元, "300 rmb"
+_AMOUNT_NOISE_RE = re.compile(r"[¥￥,，\s]|元|块|rmb|cny", re.IGNORECASE)
+
+
 class Store:
     def __init__(self, db: Database):
         self.db = db
@@ -46,6 +67,8 @@ class Store:
     # ── validation ────────────────────────────────────────────────────────
     @staticmethod
     def _validate_amount(amount: Any) -> float:
+        if isinstance(amount, str):
+            amount = _AMOUNT_NOISE_RE.sub("", amount)
         try:
             val = float(amount)
         except (TypeError, ValueError):
@@ -227,6 +250,31 @@ class Store:
             )
         return [self._row_to_expense(row) for row in rows]
 
+    def find(self, query: str, *, status: str = "all") -> list["Expense"]:
+        """Case-insensitive substring match on description/category.
+
+        Powers natural-language targeting from the MCP ("the football class")
+        so callers don't need ids.
+        """
+        needle = f"%{str(query or '').strip().lower()}%"
+        clauses = [
+            "(LOWER(COALESCE(description,'')) LIKE :q OR LOWER(COALESCE(category,'')) LIKE :q)"
+        ]
+        params: dict[str, Any] = {"q": needle}
+        if status == "paid":
+            clauses.append("paid = :paid")
+            params["paid"] = True
+        elif status == "unpaid":
+            clauses.append("paid = :paid")
+            params["paid"] = False
+        with self.db.tx() as tx:
+            rows = tx.query(
+                f"SELECT {_EXPENSE_COLS} FROM expenses WHERE {' AND '.join(clauses)} "
+                "ORDER BY date DESC, created_at DESC",
+                params,
+            )
+        return [self._row_to_expense(row) for row in rows]
+
     def summary(self) -> dict[str, Any]:
         with self.db.tx() as tx:
             row = tx.query_one(
@@ -263,16 +311,23 @@ class Store:
         ]
 
     # ── access tokens (operator-only minting — finding M2) ───────────────
-    def mint_token(self, *, label: Optional[str] = None, expires_days: int = 120) -> dict[str, Any]:
-        try:
-            expires_days = int(expires_days)
-        except (TypeError, ValueError):
-            expires_days = 120
-        expires_days = max(1, min(365, expires_days))
+    def mint_token(
+        self, *, label: Optional[str] = None, expires_days: Optional[int] = None
+    ) -> dict[str, Any]:
+        """Mint a link token. Default: NEVER expires (household links must not
+        demand credential renewal from non-technical holders; revocation is
+        the kill switch). Pass expires_days for a bounded token."""
+        expires_at = None
+        if expires_days is not None:
+            try:
+                expires_days = max(1, min(3650, int(expires_days)))
+            except (TypeError, ValueError):
+                expires_days = None
+            if expires_days is not None:
+                expires_at = (
+                    datetime.now(timezone.utc) + timedelta(days=expires_days)
+                ).strftime("%Y-%m-%dT%H:%M:%S")
         token = secrets.token_hex(32)
-        expires_at = (
-            datetime.now(timezone.utc) + timedelta(days=expires_days)
-        ).strftime("%Y-%m-%dT%H:%M:%S")
         with self.db.tx() as tx:
             tx.execute(
                 "INSERT INTO access_tokens (id, token, label, expires_at, revoked, created_at, use_count) "
@@ -300,8 +355,9 @@ class Store:
             )
             if row is None or bool(row["revoked"]):
                 return None
-            if str(row["expires_at"]) <= _utc_now_iso():
-                return None
+            expires_at = row["expires_at"]
+            if expires_at and str(expires_at) <= _utc_now_iso():
+                return None  # only bounded tokens can expire; NULL = never
             tx.execute(
                 "UPDATE access_tokens SET last_used_at = :now, use_count = use_count + 1 "
                 "WHERE id = :id",

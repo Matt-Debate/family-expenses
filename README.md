@@ -17,8 +17,11 @@ Built to replace free-text WeChat messages — not a business system.
 - **MCP** — streamable-HTTP server (Python `mcp` SDK) on Cloud Run, exposing
   `expenses_list / expenses_summary / expenses_add / expenses_mark_paid /
   expenses_mint_link`.
-- **Access** — random 64-hex tokens with expiry + revocation, minted only by
-  the owner (MCP tool or `scripts/mint_link.py`).
+- **Access** — deliberately minimal, matching the owner's threat model: the
+  portal link is a random 64-hex URL that **never expires** (the holder never
+  renews anything; revocation is the kill switch), and the MCP endpoint is
+  open unless `MCP_SECRET` is set. Nothing here is sensitive beyond a
+  household ledger.
 
 ## Repository layout
 
@@ -34,8 +37,8 @@ Built to replace free-text WeChat messages — not a business system.
 
 ```bash
 pip install -r requirements.txt
-python3 -m unittest discover -s tests        # 37 tests, sqlite, no DB server
-MCP_SECRET=dev python3 -m app.main           # http://localhost:8080
+python3 -m unittest discover -s tests        # 51 tests, sqlite, no DB server
+python3 -m app.main                          # http://localhost:8080
 python3 scripts/mint_link.py --label wife --base-url http://localhost:8080
 ```
 
@@ -44,5 +47,5 @@ Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
 
 ## Status
 
-**v0.2.0** — feature-complete for first deploy (see `docs/CHANGELOG.md`).
+**v0.3.0** — feature-complete for first deploy (see `docs/CHANGELOG.md`).
 Developed on `claude/family-expenses-setup-8uvrks`.

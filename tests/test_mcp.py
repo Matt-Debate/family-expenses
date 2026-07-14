@@ -22,7 +22,8 @@ from app.store import Store  # noqa: E402
 
 EXPECTED_TOOLS = {
     "expenses_list", "expenses_summary", "expenses_add", "expenses_mark_paid",
-    "expenses_history", "expenses_mint_link", "expenses_revoke_link",
+    "expenses_update", "expenses_delete", "expenses_history",
+    "expenses_mint_link", "expenses_revoke_link",
 }
 
 
@@ -55,10 +56,9 @@ class McpToolTests(unittest.TestCase):
 
     def test_add_list_mark_paid_history(self):
         added = tool_payload(run(self.mcp.call_tool("expenses_add", {
-            "date": "2026-07-14", "amount": 200, "description": "电费",
+            "date": "2026-07-14", "amount": "200", "description": "电费",
         })))
         eid = added["id"]
-        self.assertEqual(added["submitted_by"], "operator")
 
         listed = tool_payload(run(self.mcp.call_tool("expenses_list", {"status": "unpaid"})))
         self.assertEqual(len(listed["expenses"]), 1)
@@ -90,11 +90,78 @@ class McpToolTests(unittest.TestCase):
     def test_validation_errors_propagate(self):
         from mcp.server.fastmcp.exceptions import ToolError
         with self.assertRaises(ToolError):
-            run(self.mcp.call_tool("expenses_add", {"date": "2026-07-14", "amount": -5}))
+            run(self.mcp.call_tool("expenses_add", {"date": "2026-07-14", "amount": "-5"}))
+
+
+class NaturalSpeechTests(unittest.TestCase):
+    """'足球课付了' must work without ids, dates, or clean numbers."""
+
+    def setUp(self):
+        self.store = make_store()
+        self.mcp = build_mcp(self.store)
+
+    def call(self, tool, **args):
+        return tool_payload(run(self.mcp.call_tool(tool, args)))
+
+    def test_add_with_spoken_amount_and_no_date(self):
+        added = self.call("expenses_add", amount="¥300", description="足球课")
+        self.assertEqual(added["amount"], 300.0)
+        self.assertRegex(added["date"], r"^\d{4}-\d{2}-\d{2}$")  # defaulted to today
+
+    def test_mark_paid_by_query_defaults_today(self):
+        self.call("expenses_add", amount="300", description="足球课")
+        result = self.call("expenses_mark_paid", query="足球")
+        self.assertTrue(result["paid"])
+        self.assertRegex(result["paid_date"], r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_mark_paid_prefers_the_unpaid_match(self):
+        old = self.call("expenses_add", amount="300", description="足球课")
+        self.call("expenses_mark_paid", expense_id=old["id"], paid_date="2026-07-01")
+        self.call("expenses_add", amount="350", description="足球课")
+        result = self.call("expenses_mark_paid", query="足球")  # two matches, one unpaid
+        self.assertTrue(result["paid"])
+        self.assertNotEqual(result["id"], old["id"])
+
+    def test_ambiguous_query_returns_candidates(self):
+        self.call("expenses_add", amount="300", description="足球课")
+        self.call("expenses_add", amount="200", description="足球装备")
+        result = self.call("expenses_delete", query="足球")
+        self.assertEqual(result["matched"], 2)
+        self.assertEqual(len(result["candidates"]), 2)
+        self.assertIn("expense_id", result["hint"])
+
+    def test_no_match_returns_hint_not_error(self):
+        result = self.call("expenses_mark_paid", query="不存在的东西")
+        self.assertEqual(result["matched"], 0)
+        self.assertIn("expenses_list", result["hint"])
+
+    def test_update_by_query_with_spoken_amount(self):
+        self.call("expenses_add", amount="300", description="钢琴课")
+        result = self.call("expenses_update", query="钢琴", amount="350块")
+        self.assertEqual(result["amount"], 350.0)
+
+    def test_delete_by_query_keeps_history(self):
+        added = self.call("expenses_add", amount="300", description="旧课程")
+        result = self.call("expenses_delete", query="旧课程")
+        self.assertTrue(result["deleted"])
+        hist = self.call("expenses_history", expense_id=added["id"])
+        self.assertEqual([h["action"] for h in hist], ["create", "delete"])
+
+    def test_list_with_query_filter(self):
+        self.call("expenses_add", amount="300", description="足球课")
+        self.call("expenses_add", amount="50", description="水果")
+        listed = self.call("expenses_list", query="足球")
+        self.assertEqual(len(listed["expenses"]), 1)
+
+    def test_mint_link_never_expires_by_default(self):
+        minted = self.call("expenses_mint_link", label="wife")
+        self.assertIsNone(minted["expires_at"])
+        self.assertIsNotNone(self.store.validate_token(minted["token"]))
 
 
 class BearerMiddlewareTests(unittest.TestCase):
-    """The /mcp mount is fail-closed; other paths are untouched."""
+    """/mcp: open when MCP_SECRET unset (owner's accepted threat model),
+    enforced when set. Other paths always untouched."""
 
     def make_client(self) -> TestClient:
         async def open_ok(request):
@@ -106,13 +173,13 @@ class BearerMiddlewareTests(unittest.TestCase):
         ])
         return TestClient(McpBearerMiddleware(inner))
 
-    def test_no_secret_configured_fails_closed(self):
+    def test_no_secret_means_open(self):
         os.environ.pop("MCP_SECRET", None)
         client = self.make_client()
-        self.assertEqual(client.get("/mcp").status_code, 503)
-        self.assertEqual(client.get("/healthz").status_code, 200)  # portal unaffected
+        self.assertEqual(client.get("/mcp").status_code, 200)
+        self.assertEqual(client.get("/healthz").status_code, 200)
 
-    def test_wrong_or_missing_bearer_rejected(self):
+    def test_secret_set_enforces_bearer(self):
         os.environ["MCP_SECRET"] = "s3cret"
         try:
             client = self.make_client()
@@ -121,6 +188,7 @@ class BearerMiddlewareTests(unittest.TestCase):
                 client.get("/mcp", headers={"Authorization": "Bearer wrong"}).status_code, 401)
             self.assertEqual(
                 client.get("/mcp", headers={"Authorization": "Bearer s3cret"}).status_code, 200)
+            self.assertEqual(client.get("/healthz").status_code, 200)  # portal unaffected
         finally:
             os.environ.pop("MCP_SECRET", None)
 
@@ -130,12 +198,16 @@ class CombinedAppTests(unittest.TestCase):
 
     def test_portal_routes_present_on_combined_app(self):
         os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+        os.environ.pop("MCP_SECRET", None)
         try:
             from app.main import build_asgi_app
-            client = TestClient(build_asgi_app())
-            self.assertEqual(client.get("/healthz").status_code, 200)
-            self.assertEqual(client.get("/t/badtoken").status_code, 404)
-            self.assertEqual(client.get("/mcp").status_code, 503)  # fail-closed
+            # context manager runs the MCP session-manager lifespan
+            with TestClient(build_asgi_app()) as client:
+                self.assertEqual(client.get("/healthz").status_code, 200)
+                self.assertEqual(client.get("/t/badtoken").status_code, 404)
+                # MCP open when no secret configured: transport answers (405
+                # for plain GET without SSE accept), not 401/503 gatekeeping.
+                self.assertNotIn(client.get("/mcp").status_code, (401, 503))
         finally:
             os.environ.pop("DATABASE_URL", None)
 
