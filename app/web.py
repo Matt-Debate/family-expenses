@@ -31,7 +31,7 @@ _INVALID_LINK_HTML = """<!doctype html><html lang="zh"><head>
 </body></html>"""
 
 
-def build_app(store: Store) -> Starlette:
+def build_routes(store: Store) -> list[Route]:
     async def healthz(request: Request):
         return JSONResponse({"ok": True})
 
@@ -62,4 +62,9 @@ def build_app(store: Store) -> Starlette:
         Route(f"/api/{name}", make_api_endpoint(handler), methods=["POST"])
         for name, handler in HANDLERS.items()
     ]
-    return Starlette(routes=routes)
+    return routes
+
+
+def build_app(store: Store) -> Starlette:
+    """Portal-only app (tests / running without the MCP mount)."""
+    return Starlette(routes=build_routes(store))

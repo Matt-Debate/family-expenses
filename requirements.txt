@@ -1,0 +1,6 @@
+# Runtime dependencies — same stack as the reference Cloud Run MCP
+# (work-dashboards): FastMCP streamable-HTTP on starlette/uvicorn.
+mcp>=1.12,<2
+starlette>=0.40
+uvicorn>=0.30
+psycopg[binary]>=3.1
