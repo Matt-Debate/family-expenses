@@ -3,6 +3,17 @@
 Semantic versioning. Unreleased work accumulates under [Unreleased] and is cut
 to a release entry when a chunk set ships.
 
+## [Unreleased]
+### Ops / handoff
+- `CLAUDE.md`: project instructions for future sessions (compatibility
+  contract first, MCP-editing rules, map, commands) + one-time PC deploy
+  checklist (rename repo, merge, Neon, deploy, live smoke, mint link,
+  connect MCP).
+- `scripts/smoke_live.py`: post-deploy verification — proves schema applies
+  to real Postgres and exercises the deployed service end-to-end over the
+  public URL, with cleanup. Production entrypoint (`python -m app.main` with
+  $PORT) rehearsed in-session: healthz + portal routes OK.
+
 ## [0.4.1] — 2026-07-14
 Owner's final risk ranking encoded: the dominant risk is a family member
 being forced to reconnect (→ disuse), not unauthorized edits.
