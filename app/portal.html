@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>家庭开支 · Family Expenses</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#ffffff; --text:#1a1d21; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#2563eb; --accent-soft:#dbeafe;
+    --danger:#dc2626; --ok:#16a34a; --unpaid:#b45309; --unpaid-soft:#fef3c7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1115; --card:#181b20; --text:#e7e9ec; --muted:#9aa2ad;
+      --border:#2a2f37; --accent:#3b82f6; --accent-soft:#1e3a5f;
+      --unpaid:#fbbf24; --unpaid-soft:#3b2f0b; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); line-height:1.5;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:var(--card);
+    border-bottom:1px solid var(--border); padding:12px 16px;
+    display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:1.1rem; margin:0; }
+  .wrap { max-width:560px; margin:0 auto; padding:14px; }
+  .card { background:var(--card); border:1px solid var(--border);
+    border-radius:14px; padding:14px; margin-bottom:14px; }
+  .totals { display:flex; gap:10px; }
+  .totals .box { flex:1; border-radius:12px; padding:10px 12px; background:var(--card);
+    border:1px solid var(--border); }
+  .totals .k { font-size:.75rem; color:var(--muted); }
+  .totals .v { font-size:1.25rem; font-weight:700; }
+  .totals .unpaid .v { color:var(--unpaid); }
+  label { display:block; font-size:.78rem; color:var(--muted); margin:8px 0 3px; font-weight:600; }
+  input, select, button, textarea { font:inherit; width:100%; color:var(--text);
+    background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 12px; }
+  input:focus, select:focus { outline:2px solid var(--accent); border-color:var(--accent); }
+  .row { display:flex; gap:10px; } .row > * { flex:1; min-width:0; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff;
+    font-weight:700; margin-top:12px; cursor:pointer; font-size:1.05rem; padding:12px; }
+  .chips { display:flex; gap:8px; margin:2px 0 12px; }
+  .chip { flex:1; text-align:center; padding:8px 4px; border-radius:999px; cursor:pointer;
+    border:1px solid var(--border); background:var(--card); font-size:.9rem; }
+  .chip.on { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .item { border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px;
+    background:var(--card); }
+  .item .top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .item .desc { font-weight:600; overflow-wrap:anywhere; }
+  .item .amt { font-size:1.15rem; font-weight:700; white-space:nowrap; }
+  .item .meta { font-size:.8rem; color:var(--muted); margin-top:2px; display:flex;
+    flex-wrap:wrap; gap:4px 10px; align-items:center; }
+  .badge { font-size:.72rem; padding:2px 8px; border-radius:999px; font-weight:600; }
+  .badge.unpaid { background:var(--unpaid-soft); color:var(--unpaid); }
+  .badge.paid { background:var(--accent-soft); color:var(--accent); }
+  .btns { display:flex; gap:8px; margin-top:10px; }
+  .btns button { padding:8px 6px; font-size:.85rem; cursor:pointer; border-radius:8px; }
+  .btns .pay { color:var(--ok); border-color:var(--ok); font-weight:600; }
+  .btns .del { color:var(--danger); }
+  .editbox, .histbox { margin-top:10px; border-top:1px dashed var(--border); padding-top:8px; }
+  .hist { font-size:.78rem; color:var(--muted); margin:4px 0; }
+  .empty { text-align:center; color:var(--muted); padding:26px 0; }
+  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:22px; z-index:9;
+    background:var(--text); color:var(--bg); border-radius:10px; padding:10px 18px;
+    font-size:.9rem; opacity:0; transition:opacity .25s; pointer-events:none; }
+  .toast.show { opacity:.95; }
+  .lang { width:auto; padding:6px 12px; border-radius:999px; cursor:pointer; font-size:.85rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1 data-i18n="title"></h1>
+  <button class="lang" id="langBtn"></button>
+</header>
+
+<div class="wrap">
+  <div class="totals">
+    <div class="box unpaid"><div class="k" data-i18n="unpaid_total"></div><div class="v" id="unpaidTotal">–</div></div>
+    <div class="box"><div class="k" data-i18n="paid_total"></div><div class="v" id="paidTotal">–</div></div>
+  </div>
+
+  <div class="card">
+    <form id="addForm">
+      <label for="amount" data-i18n="amount"></label>
+      <input id="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required placeholder="0.00">
+      <label for="desc" data-i18n="desc"></label>
+      <input id="desc" type="text" data-i18n-ph="desc_ph">
+      <div class="row">
+        <div>
+          <label for="date" data-i18n="date"></label>
+          <input id="date" type="date" required>
+        </div>
+        <div>
+          <label for="category" data-i18n="category"></label>
+          <select id="category"></select>
+        </div>
+      </div>
+      <label for="who" data-i18n="who"></label>
+      <input id="who" type="text" data-i18n-ph="who_ph">
+      <button type="submit" class="primary" data-i18n="add"></button>
+    </form>
+  </div>
+
+  <div class="chips" id="chips">
+    <div class="chip" data-f="all"></div>
+    <div class="chip" data-f="unpaid"></div>
+    <div class="chip" data-f="paid"></div>
+  </div>
+
+  <div id="list"></div>
+  <div class="empty" id="empty" style="display:none" data-i18n="empty"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+  var TOKEN = (location.pathname.match(/^\/t\/([^/]+)/) || [])[1] || "";
+
+  var CATS = ["food","kids","home","transport","medical","other"];
+  var STR = {
+    zh: { title:"家庭开支", unpaid_total:"待付合计", paid_total:"已付合计",
+      amount:"金额 (¥)", desc:"内容", desc_ph:"买了什么 / 给谁付", date:"日期",
+      category:"分类", who:"记录人", who_ph:"你的名字", add:"＋ 添加开支",
+      all:"全部", unpaid:"待付", paid:"已付", empty:"还没有记录，添加第一笔吧",
+      mark_paid:"✓ 标记已付", unmark:"取消已付", edit:"编辑", del:"删除",
+      hist:"记录", save:"保存", cancel:"取消", paid_on:"付款日期",
+      confirm_del:"确定删除这条开支？", badge_unpaid:"待付", badge_paid:"已付",
+      by:"记录人", added:"已添加", saved:"已保存", deleted:"已删除",
+      marked:"已标记付款", unmarked:"已恢复待付", err:"出错了，请重试",
+      link_err:"链接无效或已过期",
+      cat: { food:"餐饮食品", kids:"孩子", home:"家居生活", transport:"交通",
+             medical:"医疗健康", other:"其他" },
+      act: { create:"创建", update:"修改", mark_paid:"标记已付",
+             unmark_paid:"取消已付", "delete":"删除" } },
+    en: { title:"Family Expenses", unpaid_total:"To pay", paid_total:"Paid",
+      amount:"Amount (¥)", desc:"Description", desc_ph:"what / who to pay", date:"Date",
+      category:"Category", who:"Your name", who_ph:"your name", add:"＋ Add expense",
+      all:"All", unpaid:"To pay", paid:"Paid", empty:"Nothing yet — add the first one",
+      mark_paid:"✓ Mark paid", unmark:"Unmark paid", edit:"Edit", del:"Delete",
+      hist:"History", save:"Save", cancel:"Cancel", paid_on:"Paid on",
+      confirm_del:"Delete this expense?", badge_unpaid:"to pay", badge_paid:"paid",
+      by:"by", added:"Added", saved:"Saved", deleted:"Deleted",
+      marked:"Marked paid", unmarked:"Back to unpaid", err:"Something went wrong",
+      link_err:"This link is invalid or expired",
+      cat: { food:"Food", kids:"Kids", home:"Home", transport:"Transport",
+             medical:"Medical", other:"Other" },
+      act: { create:"created", update:"edited", mark_paid:"marked paid",
+             unmark_paid:"unmarked", "delete":"deleted" } },
+  };
+  var lang = localStorage.getItem("fe.lang") || "zh";
+  var filter = "unpaid";
+  var expenses = [];
+
+  function t(key) { return STR[lang][key] || key; }
+  function $(id) { return document.getElementById(id); }
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  }
+  function money(n) { return "¥" + Number(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+  function toast(msg) {
+    var el = $("toast"); el.textContent = msg; el.classList.add("show");
+    setTimeout(function () { el.classList.remove("show"); }, 1800);
+  }
+  function api(name, body) {
+    body = body || {}; body.token = TOKEN;
+    return fetch("/api/" + name, {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)
+    }).then(function (r) { return r.json().then(function (j) {
+      if (!r.ok || !j.ok) { throw new Error(j.error || t("err")); } return j; }); });
+  }
+  function who() { return $("who").value.trim() || null; }
+
+  // ---- i18n ----
+  function applyLang() {
+    document.documentElement.lang = lang;
+    $("langBtn").textContent = lang === "zh" ? "EN" : "中文";
+    Array.prototype.forEach.call(document.querySelectorAll("[data-i18n]"), function (el) {
+      el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-i18n-ph]"), function (el) {
+      el.placeholder = t(el.getAttribute("data-i18n-ph"));
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#chips .chip"), function (el) {
+      el.textContent = t(el.getAttribute("data-f"));
+    });
+    var cat = $("category");
+    cat.innerHTML = CATS.map(function (c) {
+      return '<option value="' + c + '">' + esc(STR[lang].cat[c]) + "</option>";
+    }).join("");
+    render();
+  }
+  $("langBtn").addEventListener("click", function () {
+    lang = lang === "zh" ? "en" : "zh";
+    localStorage.setItem("fe.lang", lang);
+    applyLang();
+  });
+
+  // ---- rendering ----
+  function render() {
+    var list = $("list");
+    var shown = expenses;
+    list.innerHTML = shown.map(function (e) {
+      var catLabel = e.category && STR[lang].cat[e.category] ? STR[lang].cat[e.category] : (e.category || "");
+      return '<div class="item" data-id="' + e.id + '">' +
+        '<div class="top"><span class="desc">' + (esc(e.description) || catLabel || t("cat")) + "</span>" +
+        '<span class="amt">' + money(e.amount) + "</span></div>" +
+        '<div class="meta">' +
+          '<span class="badge ' + (e.paid ? "paid" : "unpaid") + '">' + t(e.paid ? "badge_paid" : "badge_unpaid") +
+            (e.paid && e.paid_date ? " · " + esc(e.paid_date) : "") + "</span>" +
+          "<span>" + esc(e.date) + "</span>" +
+          (catLabel ? "<span>" + esc(catLabel) + "</span>" : "") +
+          (e.submitted_by ? "<span>" + t("by") + " " + esc(e.submitted_by) + "</span>" : "") +
+        "</div>" +
+        '<div class="btns">' +
+          '<button class="pay" data-act="pay">' + t(e.paid ? "unmark" : "mark_paid") + "</button>" +
+          '<button data-act="edit">' + t("edit") + "</button>" +
+          '<button data-act="hist">' + t("hist") + "</button>" +
+          '<button class="del" data-act="del">' + t("del") + "</button>" +
+        "</div>" +
+        '<div class="editbox" style="display:none"></div>' +
+        '<div class="histbox" style="display:none"></div>' +
+        "</div>";
+    }).join("");
+    $("empty").style.display = shown.length ? "none" : "block";
+  }
+
+  function refresh() {
+    return api("list", {status: filter}).then(function (j) {
+      expenses = j.expenses;
+      $("unpaidTotal").textContent = money(j.summary.unpaid);
+      $("paidTotal").textContent = money(j.summary.paid);
+      render();
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ---- filter chips ----
+  function paintChips() {
+    Array.prototype.forEach.call(document.querySelectorAll("#chips .chip"), function (el) {
+      el.classList.toggle("on", el.getAttribute("data-f") === filter);
+    });
+  }
+  $("chips").addEventListener("click", function (ev) {
+    var f = ev.target.getAttribute && ev.target.getAttribute("data-f");
+    if (!f) return;
+    filter = f; paintChips(); refresh();
+  });
+
+  // ---- add ----
+  $("addForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    api("submit", {
+      date: $("date").value || today(),
+      amount: parseFloat($("amount").value),
+      category: $("category").value,
+      description: $("desc").value.trim() || null,
+      submitted_by: who(),
+    }).then(function () {
+      if (who()) localStorage.setItem("fe.name", who());
+      $("amount").value = ""; $("desc").value = "";
+      toast(t("added")); refresh();
+    }).catch(function (e) { toast(e.message); });
+  });
+
+  // ---- per-item actions ----
+  $("list").addEventListener("click", function (ev) {
+    var btn = ev.target.closest ? ev.target.closest("button[data-act]") : null;
+    if (!btn) return;
+    var itemEl = btn.closest(".item");
+    var id = itemEl.getAttribute("data-id");
+    var exp = expenses.filter(function (e) { return e.id === id; })[0];
+    if (!exp) return;
+    var act = btn.getAttribute("data-act");
+
+    if (act === "pay") {
+      if (exp.paid) {
+        api("mark-paid", {id:id, paid:false, changed_by:who()})
+          .then(function () { toast(t("unmarked")); refresh(); })
+          .catch(function (e) { toast(e.message); });
+      } else {
+        var d = prompt(t("paid_on"), today());
+        if (d === null) return;
+        api("mark-paid", {id:id, paid:true, paid_date:d.trim(), changed_by:who()})
+          .then(function () { toast(t("marked")); refresh(); })
+          .catch(function (e) { toast(e.message); });
+      }
+    } else if (act === "del") {
+      if (!confirm(t("confirm_del"))) return;
+      api("delete", {id:id, changed_by:who()})
+        .then(function () { toast(t("deleted")); refresh(); })
+        .catch(function (e) { toast(e.message); });
+    } else if (act === "edit") {
+      var box = itemEl.querySelector(".editbox");
+      if (box.style.display !== "none") { box.style.display = "none"; return; }
+      box.style.display = "block";
+      box.innerHTML =
+        '<label>' + t("amount") + '</label><input type="number" step="0.01" min="0.01" class="e-amt" value="' + exp.amount + '">' +
+        '<label>' + t("desc") + '</label><input type="text" class="e-desc" value="' + esc(exp.description || "") + '">' +
+        '<div class="row"><div><label>' + t("date") + '</label><input type="date" class="e-date" value="' + esc(exp.date) + '"></div>' +
+        '<div><label>' + t("category") + '</label><select class="e-cat">' +
+          CATS.map(function (c) { return '<option value="' + c + '"' + (exp.category === c ? " selected" : "") + ">" + esc(STR[lang].cat[c]) + "</option>"; }).join("") +
+        "</select></div></div>" +
+        '<div class="btns"><button class="pay" data-e="save">' + t("save") + '</button>' +
+        '<button data-e="cancel">' + t("cancel") + "</button></div>";
+      box.onclick = function (ev2) {
+        var b2 = ev2.target.closest ? ev2.target.closest("button[data-e]") : null;
+        if (!b2) return;
+        ev2.stopPropagation();
+        if (b2.getAttribute("data-e") === "cancel") { box.style.display = "none"; return; }
+        api("update", {id:id, changed_by:who(), fields:{
+          amount: parseFloat(box.querySelector(".e-amt").value),
+          description: box.querySelector(".e-desc").value.trim() || null,
+          date: box.querySelector(".e-date").value,
+          category: box.querySelector(".e-cat").value,
+        }}).then(function () { toast(t("saved")); refresh(); })
+          .catch(function (e) { toast(e.message); });
+      };
+    } else if (act === "hist") {
+      var hbox = itemEl.querySelector(".histbox");
+      if (hbox.style.display !== "none") { hbox.style.display = "none"; return; }
+      api("history", {id:id}).then(function (j) {
+        hbox.style.display = "block";
+        hbox.innerHTML = j.history.map(function (h) {
+          return '<div class="hist">' + esc(h.changed_at.replace("T", " ")) + " · " +
+            esc(STR[lang].act[h.action] || h.action) +
+            (h.changed_by ? " · " + esc(h.changed_by) : "") +
+            " · " + money(h.snapshot.amount) + "</div>";
+        }).join("") || '<div class="hist">–</div>';
+      }).catch(function (e) { toast(e.message); });
+    }
+  });
+
+  // ---- init ----
+  $("date").value = today();
+  $("who").value = localStorage.getItem("fe.name") || "";
+  paintChips();
+  applyLang();
+  refresh();
+})();
+</script>
+</body>
+</html>

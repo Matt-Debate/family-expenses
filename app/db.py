@@ -42,7 +42,9 @@ class Database:
     def __init__(self, url: str | None = None):
         self.url = url or os.environ.get("DATABASE_URL") or "sqlite:///family_expenses.db"
         self.is_pg = self.url.startswith(("postgres://", "postgresql://"))
-        self._local = threading.local()
+        self._local = threading.local()  # Postgres: one connection per thread
+        self._lock = threading.RLock()   # sqlite: one shared connection, serialized
+        self._sqlite_conn: sqlite3.Connection | None = None
 
     # ── connections ───────────────────────────────────────────────────────
     def _connect(self):
@@ -52,35 +54,64 @@ class Database:
 
             return psycopg.connect(self.url, row_factory=dict_row)
         path = self.url[len("sqlite:///"):] if self.url.startswith("sqlite:///") else self.url
-        conn = sqlite3.connect(path)
+        # Single shared connection: an in-memory sqlite DB is per-connection,
+        # and web servers dispatch requests across threads — per-thread
+        # connections would each see their own (empty) database. All sqlite
+        # transactions are serialized by self._lock instead.
+        conn = sqlite3.connect(path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     def _conn(self):
-        conn = getattr(self._local, "conn", None)
-        if conn is None:
-            conn = self._connect()
-            self._local.conn = conn
-        return conn
+        if self.is_pg:
+            conn = getattr(self._local, "conn", None)
+            if conn is None:
+                conn = self._connect()
+                self._local.conn = conn
+            return conn
+        with self._lock:
+            if self._sqlite_conn is None:
+                self._sqlite_conn = self._connect()
+            return self._sqlite_conn
 
     def close(self) -> None:
-        conn = getattr(self._local, "conn", None)
-        if conn is not None:
-            conn.close()
-            self._local.conn = None
+        if self.is_pg:
+            conn = getattr(self._local, "conn", None)
+            if conn is not None:
+                conn.close()
+                self._local.conn = None
+            return
+        with self._lock:
+            if self._sqlite_conn is not None:
+                self._sqlite_conn.close()
+                self._sqlite_conn = None
 
     # ── transactions ──────────────────────────────────────────────────────
     @contextmanager
     def tx(self):
-        """Yield a :class:`_Tx`; commit on success, roll back on exception."""
-        conn = self._conn()
-        try:
-            yield _Tx(conn, self.is_pg)
-            conn.commit()
-        except BaseException:
-            conn.rollback()
-            raise
+        """Yield a :class:`_Tx`; commit on success, roll back on exception.
+
+        sqlite transactions hold the process-wide lock for their duration so
+        concurrent request threads serialize instead of interleaving writes.
+        """
+        if self.is_pg:
+            conn = self._conn()
+            try:
+                yield _Tx(conn, True)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            return
+        with self._lock:
+            conn = self._conn()
+            try:
+                yield _Tx(conn, False)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
 
     # ── schema ────────────────────────────────────────────────────────────
     def init(self, schema_path: Path | str = _SCHEMA_PATH) -> None:
