@@ -15,7 +15,7 @@ streamable-HTTP MCP. That repo receives **no commits or pushes**.
   `expense_history`, `access_tokens` per contract §4.
 - New `README.md`.
 
-## Chunk 2 — Core store (Python) + tests
+## Chunk 2 — Core store (Python) + tests  ✅
 - `app/db.py` — connection layer: `DATABASE_URL` (Neon/psycopg) or sqlite path
   (tests); named-param SQL translated per driver; transaction context manager
   (commit/rollback); idempotent `init_db(schema.sql)`.
@@ -26,13 +26,13 @@ streamable-HTTP MCP. That repo receives **no commits or pushes**.
 - `tests/test_store.py` — full CRUD/validation/history/atomicity/token suite
   against sqlite (runs in CI with no Postgres — acceptance A6).
 
-## Chunk 3 — Portal web app
+## Chunk 3 — Portal web app  ✅
 - `app/web.py` — Starlette app: `GET /t/<token>` (portal page), `GET /healthz`,
   the six `/api/*` JSON endpoints (token revalidated per request).
 - `app/portal.html` — single-file mobile-first UI, 中文 default + EN toggle.
 - `tests/test_web.py` — endpoint tests via Starlette TestClient (sqlite).
 
-## Chunk 4 — MCP + deploy
+## Chunk 4 — MCP + deploy  ✅
 - `app/mcp_server.py` — FastMCP (`mcp>=1.12,<2`, same as work-dashboards)
   exposing the five tools (contract §7); mounted at `/mcp` on the same
   Starlette app; `app/main.py` entrypoint (uvicorn, `$PORT`).
@@ -41,7 +41,7 @@ streamable-HTTP MCP. That repo receives **no commits or pushes**.
 - `requirements.txt`.
 - `tests/test_mcp.py` — tool registration + calls against sqlite.
 
-## Chunk 5 — Runbook + release
+## Chunk 5 — Runbook + release  ✅
 - `docs/RUNBOOK.md` — create Neon DB, apply schema, deploy to Cloud Run, mint
   the household link, revoke/rotate, connect Claude/ChatGPT to the MCP.
 - Changelog `0.1.0` release entry; final README polish.

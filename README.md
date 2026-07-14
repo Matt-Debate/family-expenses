@@ -30,8 +30,19 @@ Built to replace free-text WeChat messages — not a business system.
 | `scripts/` | operator tooling (mint links) |
 | `docs/` | feature contract, implementation plan, changelog, runbook |
 
+## Quick start
+
+```bash
+pip install -r requirements.txt
+python3 -m unittest discover -s tests        # 37 tests, sqlite, no DB server
+MCP_SECRET=dev python3 -m app.main           # http://localhost:8080
+python3 scripts/mint_link.py --label wife --base-url http://localhost:8080
+```
+
+Deploying to Cloud Run + Neon, minting the real link, and connecting
+Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
+
 ## Status
 
-Under active development on `claude/family-expenses-setup-8uvrks` — see
-`docs/IMPLEMENTATION_PLAN.md` for the chunk-by-chunk state and
-`docs/CHANGELOG.md` for history.
+**v0.2.0** — feature-complete for first deploy (see `docs/CHANGELOG.md`).
+Developed on `claude/family-expenses-setup-8uvrks`.

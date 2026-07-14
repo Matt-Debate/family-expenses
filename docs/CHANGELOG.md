@@ -3,21 +3,39 @@
 Semantic versioning. Unreleased work accumulates under [Unreleased] and is cut
 to a release entry when a chunk set ships.
 
-## [Unreleased]
-### Changed
-- **v0.2.0 architecture pivot (2026-07-14, owner direction):** the feature
-  moves from a `work-dashboards` in-repo portal to this **standalone repo**.
-  `work-dashboards` is reference-only (patterns: portal-token links, Neon,
-  Cloud Run streamable-HTTP MCP) and receives no commits or pushes. Isolation
-  from the business system is now structural (separate repo / DB / services).
-  MCP hosting: Cloud Run (owner: "already works; no need to introduce new
-  tech").
+## [0.2.0] — 2026-07-14
+First complete implementation (chunks 1–5), ready for first deploy.
+
+### Added
+- **Store** (`app/store.py`, `app/db.py`): portable Postgres/sqlite layer;
+  create/update/mark-paid/delete/list/summary/history; every mutation writes
+  one append-only `expense_history` row in the same transaction (M3); token
+  mint/validate/revoke, fail-closed with usage tracking (M2);
+  `expense_history.seq` for deterministic ordering.
+- **Portal** (`app/web.py`, `app/api.py`, `app/portal.html`): `/t/<token>`
+  mobile-first bilingual (中文/EN) page — add, inline edit, mark paid with
+  date, filters, totals, per-item history; JSON API revalidates the token on
+  every request (401/400/404 mapping).
+- **MCP** (`app/mcp_server.py`, `app/main.py`): FastMCP streamable-HTTP with 7
+  operator tools incl. `expenses_mint_link`/`expenses_revoke_link`; `/mcp`
+  gated by `Authorization: Bearer $MCP_SECRET`, fail-closed when unset; one
+  Cloud Run service serves portal + API + MCP.
+- **Ops**: `Dockerfile`, `cloudbuild.yaml`, `scripts/mint_link.py`,
+  `docs/RUNBOOK.md`.
+- **Tests**: 37 (store, HTTP tier, MCP tools, bearer middleware, combined
+  app) — run on sqlite with no DB server; plus live smokes: real uvicorn
+  portal flow and a real MCP client handshake with bearer auth.
+
+### Changed (architecture pivot, owner direction)
+- The feature moved from a `work-dashboards` in-repo portal to this
+  **standalone repo**. `work-dashboards` is reference-only (patterns:
+  portal-token links, Neon, Cloud Run streamable-HTTP MCP) and receives no
+  commits or pushes. Isolation from the business system is structural
+  (separate repo / DB / services). MCP hosting: Cloud Run (owner: "already
+  works; no need to introduce new tech").
 ### Removed
 - Superseded localStorage prototype (`index.html`) — replaced by the
   server-backed portal (history preserved in git).
-### Added
-- Feature contract v0.2.0, implementation plan (chunked), portable
-  `db/schema.sql` (`expenses`, `expense_history`, `access_tokens`).
 
 ## Planning history (v0.1.x, in work-dashboards — superseded)
 - `0.1.1` — contract + plan revised per independent adversarial verification
