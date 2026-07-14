@@ -32,6 +32,9 @@ CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
 CREATE TABLE IF NOT EXISTS expense_history (
   id          TEXT PRIMARY KEY,
   expense_id  TEXT NOT NULL,
+  -- monotonic per-expense sequence (0-based); second-resolution timestamps
+  -- alone cannot order same-second mutations deterministically
+  seq         INTEGER NOT NULL,
   action      TEXT NOT NULL CHECK (
                 action IN ('create', 'update', 'mark_paid', 'unmark_paid', 'delete')
               ),
@@ -40,7 +43,7 @@ CREATE TABLE IF NOT EXISTS expense_history (
   snapshot    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_expense_history_expense
-  ON expense_history(expense_id, changed_at);
+  ON expense_history(expense_id, seq);
 
 -- Bookmarkable household links (pattern adapted from work-dashboards
 -- portal_tokens, minus tenancy/scoping).
