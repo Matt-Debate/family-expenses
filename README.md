@@ -1,45 +1,37 @@
 # Family Expenses
 
-A simple, private expense tracker for a household. It's a single self-contained
-web page — no accounts, no server, no build step. Just open it and start
-tracking.
+A tiny, private household expense portal. One bookmarkable link for a family
+member to **submit and edit expenses that need paying** (with a "mark paid on
+date" check-off and a full edit history), plus an **MCP server** so the owner
+can query the ledger from Claude or ChatGPT.
 
-## How to use it
+Built to replace free-text WeChat messages — not a business system.
 
-Open `index.html` in any modern browser (double-click the file, or serve the
-folder). That's it.
+## How it fits together
 
-- **Add an expense** — date, amount, category, who paid, and an optional note.
-- **Edit / delete** any row from the table.
-- **Switch months** with the picker in the top bar.
-- **Categories & totals** — spending is grouped by category with a donut chart
-  and per-category breakdown.
-- **Budgets** — set a monthly limit per category; the bars fill as you spend and
-  turn red when you go over.
-- **Filter** the expense list by category.
+- **Portal** — one mobile-first page (中文 default / English toggle) served at
+  `/t/<token>`. Anyone with the link can add, edit, and mark expenses paid; no
+  accounts. Every change is recorded in an append-only history.
+- **Store** — Postgres (Neon) in production; the same portable SQL runs the
+  test suite on sqlite with no database server.
+- **MCP** — streamable-HTTP server (Python `mcp` SDK) on Cloud Run, exposing
+  `expenses_list / expenses_summary / expenses_add / expenses_mark_paid /
+  expenses_mint_link`.
+- **Access** — random 64-hex tokens with expiry + revocation, minted only by
+  the owner (MCP tool or `scripts/mint_link.py`).
 
-## Where your data lives
+## Repository layout
 
-Everything is saved in your browser's `localStorage`. It never leaves your
-device — there's no backend. Because of that:
+| path | contents |
+|---|---|
+| `db/schema.sql` | portable DDL (Postgres + sqlite), applied idempotently at startup |
+| `app/` | store, web portal, MCP server |
+| `tests/` | suite runs on sqlite — no live DB needed |
+| `scripts/` | operator tooling (mint links) |
+| `docs/` | feature contract, implementation plan, changelog, runbook |
 
-- Data is tied to **this browser on this device**. It won't sync across phones
-  or laptops.
-- Clearing your browser data will erase it.
+## Status
 
-Use **Export** (top bar) to download a JSON backup, and **Import** to restore it
-or move it to another device/browser. Backing up regularly is recommended.
-
-## Roadmap ideas
-
-This is intentionally a v1 built to be usable immediately. Natural next steps:
-
-- Recurring expenses and income tracking
-- Multi-device sync (would require a backend + database)
-- CSV export and receipt attachments
-- Shared access for multiple family members
-
-## Tech
-
-Plain HTML, CSS, and vanilla JavaScript in one file — no dependencies, works
-offline. Charts are drawn with inline SVG.
+Under active development on `claude/family-expenses-setup-8uvrks` — see
+`docs/IMPLEMENTATION_PLAN.md` for the chunk-by-chunk state and
+`docs/CHANGELOG.md` for history.
