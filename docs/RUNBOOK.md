@@ -20,15 +20,22 @@ gcloud run deploy family-expenses \
   --region=<your-region> --allow-unauthenticated \
   --set-env-vars=DATABASE_URL='postgres://…'
 ```
-Auth posture (deliberate, per the owner's threat model — low-stakes household
-ledger behind unguessable URLs):
-- Portal links **never expire**; nobody renews anything. Revocation
-  (`expenses_revoke_link`) is the kill switch.
-- The MCP endpoint is **open** as deployed above. To gate it later, add
-  `--set-env-vars=MCP_SECRET='<random string>'` and put
-  `Authorization: Bearer <secret>` in each client — no code change.
-- `APP_TZ` (default `Asia/Shanghai`) controls what "today" means for default
-  dates.
+Auth posture (final): links never expire, `/mcp` is open, nobody ever
+re-authenticates. `APP_TZ` (default `Asia/Shanghai`) controls what "today"
+means for default dates.
+
+### Don't break her setup (the one rule that matters)
+Once a family member's phone has the portal bookmark and/or an MCP connector,
+these must stay stable across every future deploy:
+- **Same Cloud Run service name + region** — that keeps the URL identical.
+  Redeploying new code to the same service is always safe.
+- **Never set `MCP_SECRET`** on a service her app points at — her connector
+  has no header and would silently start failing. (The gate exists in code
+  for a hypothetical abuse-response someday; enabling it means redoing her
+  connector by hand and accepting that cost.)
+- **Don't revoke her token** unless you mean to cut her off; mint+swap first.
+- Freely changeable anytime: portal UI, tool descriptions, new tools, docs,
+  additive schema changes. Test with your own connector before caring.
 
 ## 2. Mint the household link
 

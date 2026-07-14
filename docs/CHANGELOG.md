@@ -3,6 +3,18 @@
 Semantic versioning. Unreleased work accumulates under [Unreleased] and is cut
 to a release entry when a chunk set ships.
 
+## [0.4.1] — 2026-07-14
+Owner's final risk ranking encoded: the dominant risk is a family member
+being forced to reconnect (→ disuse), not unauthorized edits.
+
+### Added
+- **Compatibility contract** (FEATURE_CONTRACT §5.1, acceptance A8): frozen
+  surface = service URL, `/t/<token>` path + her token, `/mcp` mount,
+  no-auth-header posture. Runbook gains "Don't break her setup" rules.
+- `CompatibilityContractTests` pin the frozen surface in CI (mount path,
+  route shapes, credential-free defaults, heavy use never invalidating a
+  link). Suite 59 → **63**.
+
 ## [0.4.0] — 2026-07-14
 Agent-ergonomics rework, motivated by the owner's experience of MCP guidance
 "the agent never sees": all behavior now lives in channels agents reliably

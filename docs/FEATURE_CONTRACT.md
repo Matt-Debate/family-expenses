@@ -84,9 +84,25 @@ pattern, minus tenancy/scoping.
   switch). Bounded expiry remains available per token.
 - Every API request revalidates the token (revoked + expiry-if-set,
   fail-closed on unknown/garbage tokens).
-- **MCP gate is optional**: `MCP_SECRET` set → bearer enforced; unset → open.
-  Accepted threat model (owner, 2026-07-14): unguessable URLs, no personal
-  data beyond a household ledger, worst-case edit = an inflated month.
+- **MCP gate is optional and OFF**: `MCP_SECRET` unset → open. Owner's risk
+  ranking (final, 2026-07-14): the dominant risk is a non-technical family
+  member being forced to reconnect/re-auth after a change — the app falls
+  into disuse and the build is blamed. Unauthorized ledger edits are a
+  lesser, recoverable risk (audit history + revocation); auth gets added
+  only if abuse actually happens, as a conscious trade.
+
+### 5.1 Compatibility contract (highest-priority invariant)
+No change may require the portal link or a connected MCP client to be
+reconfigured. Frozen once a family member is connected:
+  * the service URL (same Cloud Run service name + region across deploys),
+  * the `/t/<token>` portal path and her minted token (never expire, never
+    casually revoked),
+  * the `/mcp` mount path,
+  * the no-auth-header posture (`MCP_SECRET` stays unset on any service her
+    app points at).
+Safe to change freely: portal UI, tool descriptions/additions, docs, schema
+additions. Renaming/removing tools is safe for connectivity (clients list
+tools dynamically) but wait for a natural moment.
 
 ## 6. API contract (portal)
 
@@ -148,6 +164,9 @@ mark paid" with date, paid/unpaid filter, running totals.
 - **A7** Single casual utterances (中文 or EN) — add with spoken amount and no
   date, mark-paid by description — succeed via MCP without ids; ambiguous
   phrases return candidates rather than acting on a guess.
+- **A8** No release may require re-authentication, reconnection, or
+  reconfiguration by a link/connector holder (§5.1). Zero-credential
+  operation is permanent unless the owner explicitly trades it away.
 
 ## 10. Versioning & docs
 

@@ -261,6 +261,36 @@ class BearerMiddlewareTests(unittest.TestCase):
             os.environ.pop("MCP_SECRET", None)
 
 
+class CompatibilityContractTests(unittest.TestCase):
+    """FEATURE_CONTRACT §5.1 / A8: nothing may ever force a connected family
+    member to reconnect. These pin the frozen surface — if one of these fails,
+    the change would break her bookmark or connector."""
+
+    def test_mcp_mount_path_is_frozen(self):
+        self.assertEqual(McpBearerMiddleware(lambda s, r, w: None).prefix, "/mcp")
+
+    def test_portal_path_shape_is_frozen(self):
+        from app.web import build_routes
+        paths = {r.path for r in build_routes(make_store())}
+        self.assertIn("/t/{token}", paths)
+        self.assertIn("/healthz", paths)
+        for name in ("list", "submit", "update", "mark-paid", "delete", "history"):
+            self.assertIn(f"/api/{name}", paths)
+
+    def test_default_posture_needs_no_credentials(self):
+        # unset MCP_SECRET = open; minted tokens have no expiry
+        os.environ.pop("MCP_SECRET", None)
+        store = make_store()
+        minted = store.mint_token(label="wife")
+        self.assertIsNone(minted["expires_at"])
+
+    def test_revocation_is_explicit_never_automatic(self):
+        store = make_store()
+        token = store.mint_token(label="wife")["token"]
+        for _ in range(50):  # heavy use must never invalidate a link
+            self.assertIsNotNone(store.validate_token(token))
+
+
 class CombinedAppTests(unittest.TestCase):
     """build_asgi_app wires MCP + portal into one service."""
 

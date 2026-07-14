@@ -50,6 +50,13 @@ tone (reply in the user's language, one-line confirmations, confirm deletes):
 Prompts are user-invoked (a picker in Claude apps); they are an accelerator,
 not a dependency — the tools alone carry every rule needed for cold requests.
 
+## Priority order
+
+Owner's ranking: **availability-for-the-family > everything else**. A change
+that risks forcing a reconnect is worse than a change that risks a bad ledger
+entry. See FEATURE_CONTRACT §5.1 (compatibility contract) — mount path, URL
+stability, and the no-header posture are frozen.
+
 ## Regression guardrails
 
 `tests/test_mcp.py::AgentErgonomicsTests` pins all of this: bilingual triggers
