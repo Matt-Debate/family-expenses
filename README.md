@@ -14,9 +14,10 @@ Built to replace free-text WeChat messages — not a business system.
   accounts. Every change is recorded in an append-only history.
 - **Store** — Postgres (Neon) in production; the same portable SQL runs the
   test suite on sqlite with no database server.
-- **MCP** — streamable-HTTP server (Python `mcp` SDK) on Cloud Run, exposing
-  `expenses_list / expenses_summary / expenses_add / expenses_mark_paid /
-  expenses_mint_link`.
+- **MCP** — streamable-HTTP server (Python `mcp` SDK) on Cloud Run: 9 tools
+  built for casual speech (fuzzy targeting, coached errors, bilingual
+  triggers) plus 记账/对账/修复 persona prompts — design rationale in
+  `docs/MCP_DESIGN.md`.
 - **Access** — deliberately minimal, matching the owner's threat model: the
   portal link is a random 64-hex URL that **never expires** (the holder never
   renews anything; revocation is the kill switch), and the MCP endpoint is
@@ -37,7 +38,7 @@ Built to replace free-text WeChat messages — not a business system.
 
 ```bash
 pip install -r requirements.txt
-python3 -m unittest discover -s tests        # 51 tests, sqlite, no DB server
+python3 -m unittest discover -s tests        # 59 tests, sqlite, no DB server
 python3 -m app.main                          # http://localhost:8080
 python3 scripts/mint_link.py --label wife --base-url http://localhost:8080
 ```
@@ -47,5 +48,5 @@ Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
 
 ## Status
 
-**v0.3.0** — feature-complete for first deploy (see `docs/CHANGELOG.md`).
+**v0.4.0** — feature-complete for first deploy (see `docs/CHANGELOG.md`).
 Developed on `claude/family-expenses-setup-8uvrks`.

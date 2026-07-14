@@ -65,25 +65,38 @@ class Store:
         self.db = db
 
     # ── validation ────────────────────────────────────────────────────────
+    # Error strings double as agent coaching: an LLM that calls wrongly reads
+    # the message and self-corrects on the next call.
     @staticmethod
     def _validate_amount(amount: Any) -> float:
+        original = amount
         if isinstance(amount, str):
             amount = _AMOUNT_NOISE_RE.sub("", amount)
         try:
             val = float(amount)
         except (TypeError, ValueError):
-            raise ValidationError("amount must be a number")
+            raise ValidationError(
+                f"amount {original!r} not understood — pass digits, e.g. 300, "
+                "'¥300' or '300块' (Chinese numerals like 三百 must be converted "
+                "to digits first)"
+            )
         if not (val > 0):
-            raise ValidationError("amount must be greater than 0")
+            raise ValidationError(f"amount must be greater than 0, got {val}")
         return val
 
     @staticmethod
     def _validate_date(value: Any, field: str = "date") -> str:
         text = str(value).strip() if value is not None else ""
         if not text:
-            raise ValidationError(f"{field} is required")
+            raise ValidationError(
+                f"{field} is required — YYYY-MM-DD, or omit it to default to today"
+            )
         if not _DATE_RE.match(text):
-            raise ValidationError(f"{field} must be in YYYY-MM-DD format")
+            raise ValidationError(
+                f"{field} {text!r} invalid — use YYYY-MM-DD (e.g. 2026-07-14); "
+                "convert relative words like 昨天/yesterday to a real date, or "
+                "omit the field to default to today"
+            )
         return text
 
     # ── helpers ───────────────────────────────────────────────────────────
@@ -162,7 +175,11 @@ class Store:
             raise ValidationError("no fields to update")
         unknown = set(fields) - _ALLOWED_UPDATE_FIELDS
         if unknown:
-            raise ValidationError(f"unknown update fields: {sorted(unknown)}")
+            hint = (
+                " — to mark paid/unpaid use mark_paid (expenses_mark_paid), not update"
+                if {"paid", "paid_date"} & unknown else ""
+            )
+            raise ValidationError(f"unknown update fields: {sorted(unknown)}{hint}")
         clean: dict[str, Any] = {}
         for key, value in fields.items():
             if key == "amount":

@@ -3,6 +3,42 @@
 Semantic versioning. Unreleased work accumulates under [Unreleased] and is cut
 to a release entry when a chunk set ships.
 
+## [0.4.0] — 2026-07-14
+Agent-ergonomics rework, motivated by the owner's experience of MCP guidance
+"the agent never sees": all behavior now lives in channels agents reliably
+read (tool descriptions, results, error strings, annotations) — codified in
+**docs/MCP_DESIGN.md**.
+
+### Added
+- `expenses_help` tool — playbook-as-a-tool ("START HERE when unsure");
+  works on clients that never surface server `instructions`.
+- **Three personas as MCP prompts**: 记账 `jizhang` (quick add), 对账
+  `duizhang` (settle up), 修复 `xiufu` (fix a mistake).
+- Bilingual trigger phrases and cross-references ("to X use tool Y") inside
+  every tool description — the channel that drives tool selection.
+- **Coached error strings**: wrong amount says what parses ('¥300', '300块');
+  bad date says relative words must be converted or omitted; touching paid
+  via update redirects to expenses_mark_paid. One-round-trip self-correction.
+- Write results carry a `note` with the running unpaid total.
+- `expenses_add` records already-paid expenses in one call (`paid=true`,
+  audit trail keeps create + mark_paid).
+- Tool annotations: reads flagged read-only (fewer client permission
+  prompts), delete/revoke flagged destructive.
+
+### Changed
+- `expenses_summary` **removed** (9 tools total): redundant with the summary
+  already returned by `expenses_list`; redundant read tools split selection
+  probability (see MCP_DESIGN.md).
+- `amount` params accept numbers **or** strings — pydantic v2 does not coerce
+  int→str, so the old `str` type silently rejected numeric arguments from
+  agents (exactly the "worked for the dev, failed for the agent" class).
+- `expenses_history` returns `{"history": [...]}` (object, not bare array).
+
+### Tests
+- Suite 51 → **59**; new `AgentErgonomicsTests` pin triggers, cross-refs,
+  annotations, personas, numeric amounts, one-call paid add, result notes,
+  and coaching text in errors — regressions in agent-visible channels fail CI.
+
 ## [0.3.0] — 2026-07-14
 Auth scaled back to the owner's explicit threat model (low-stakes household
 ledger, zero-tech user, unguessable URLs); MCP reworked for natural speech.

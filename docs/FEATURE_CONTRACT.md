@@ -1,6 +1,6 @@
 # Feature Contract — Family Expenses
 
-**Status:** ACTIVE (v0.3.0 — auth minimized per owner threat model)
+**Status:** ACTIVE (v0.4.0 — agent-ergonomics rework, see docs/MCP_DESIGN.md)
 **Owner:** matt-debate
 **Repo:** `matt-debate/test` (to be renamed `family-expenses`)
 **Branch:** `claude/family-expenses-setup-8uvrks`
@@ -110,17 +110,22 @@ commit-on-success / rollback-on-error.
 
 ## 7. MCP surface (operator)
 
-Tools on the Cloud Run streamable-HTTP MCP: `expenses_list`,
-`expenses_summary`, `expenses_add`, `expenses_update`, `expenses_mark_paid`,
+Tools (9) on the Cloud Run streamable-HTTP MCP: `expenses_help`,
+`expenses_list`, `expenses_add`, `expenses_update`, `expenses_mark_paid`,
 `expenses_delete`, `expenses_history`, `expenses_mint_link`,
-`expenses_revoke_link`. Same store as the portal, so history/atomicity rules
-apply identically.
+`expenses_revoke_link` — inventory rationale in `docs/MCP_DESIGN.md`
+(`expenses_summary` folded into `list`). Plus three persona prompts
+(记账/对账/修复). Same store as the portal, so history/atomicity rules apply
+identically.
 
 **Natural-speech design (primary requirement):** mutating tools accept a
 fuzzy `query` instead of an id (one match acts; several return candidates;
 mark-paid prefers the unpaid match); dates default to today in `APP_TZ`
 (default Asia/Shanghai); amounts tolerate ¥/块/元/comma forms; server
-instructions coach LLM clients with bilingual example utterances.
+instructions coach LLM clients with bilingual example utterances. Guidance
+lives only in channels agents reliably read — tool descriptions, results,
+error strings, annotations (`docs/MCP_DESIGN.md`); error strings coach the
+correcting call; write results carry the running unpaid total.
 
 ## 8. UI
 

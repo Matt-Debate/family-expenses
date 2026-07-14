@@ -51,9 +51,14 @@ to renew, ever.
   `MCP_SECRET`.
 - **ChatGPT (developer mode):** same URL (+ header if gated).
 
-Tools: `expenses_list`, `expenses_summary`, `expenses_add`,
-`expenses_update`, `expenses_mark_paid`, `expenses_delete`,
-`expenses_history`, `expenses_mint_link`, `expenses_revoke_link`.
+Tools: `expenses_help`, `expenses_list`, `expenses_add`, `expenses_update`,
+`expenses_mark_paid`, `expenses_delete`, `expenses_history`,
+`expenses_mint_link`, `expenses_revoke_link` (design: `docs/MCP_DESIGN.md`).
+
+**Personas** (appear as prompt templates in Claude apps; optional):
+记账 `jizhang` = dictate expenses; 对账 `duizhang` = walk the unpaid list and
+check off; 修复 `xiufu` = find and fix a wrong entry. The tools alone handle
+cold requests — personas just set the tone and workflow.
 
 ## 4. What you (or she) can say to it
 

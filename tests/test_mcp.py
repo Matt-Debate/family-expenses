@@ -21,7 +21,7 @@ from app.mcp_server import McpBearerMiddleware, build_mcp  # noqa: E402
 from app.store import Store  # noqa: E402
 
 EXPECTED_TOOLS = {
-    "expenses_list", "expenses_summary", "expenses_add", "expenses_mark_paid",
+    "expenses_help", "expenses_list", "expenses_add", "expenses_mark_paid",
     "expenses_update", "expenses_delete", "expenses_history",
     "expenses_mint_link", "expenses_revoke_link",
 }
@@ -70,9 +70,9 @@ class McpToolTests(unittest.TestCase):
         self.assertTrue(paid["paid"])
 
         hist = tool_payload(run(self.mcp.call_tool("expenses_history", {"expense_id": eid})))
-        self.assertEqual([h["action"] for h in hist], ["create", "mark_paid"])
+        self.assertEqual([h["action"] for h in hist["history"]], ["create", "mark_paid"])
 
-        summary = tool_payload(run(self.mcp.call_tool("expenses_summary", {})))
+        summary = tool_payload(run(self.mcp.call_tool("expenses_list", {})))["summary"]
         self.assertEqual(summary["paid"], 200.0)
 
     def test_mint_and_revoke_link(self):
@@ -145,7 +145,7 @@ class NaturalSpeechTests(unittest.TestCase):
         result = self.call("expenses_delete", query="旧课程")
         self.assertTrue(result["deleted"])
         hist = self.call("expenses_history", expense_id=added["id"])
-        self.assertEqual([h["action"] for h in hist], ["create", "delete"])
+        self.assertEqual([h["action"] for h in hist["history"]], ["create", "delete"])
 
     def test_list_with_query_filter(self):
         self.call("expenses_add", amount="300", description="足球课")
@@ -157,6 +157,74 @@ class NaturalSpeechTests(unittest.TestCase):
         minted = self.call("expenses_mint_link", label="wife")
         self.assertIsNone(minted["expires_at"])
         self.assertIsNotNone(self.store.validate_token(minted["token"]))
+
+
+class AgentErgonomicsTests(unittest.TestCase):
+    """The channels agents actually read: descriptions, results, errors,
+    prompts, annotations (docs/MCP_DESIGN.md)."""
+
+    def setUp(self):
+        self.store = make_store()
+        self.mcp = build_mcp(self.store)
+
+    def call(self, tool, **args):
+        return tool_payload(run(self.mcp.call_tool(tool, args)))
+
+    def test_help_tool_returns_playbook(self):
+        text = self.call("expenses_help")
+        for anchor in ("expenses_mark_paid", "足球课", "today", "candidates"):
+            self.assertIn(anchor, text)
+
+    def test_descriptions_carry_bilingual_triggers(self):
+        tools = {t.name: t for t in run(self.mcp.list_tools())}
+        self.assertIn("付了", tools["expenses_mark_paid"].description)
+        self.assertIn("paid", tools["expenses_mark_paid"].description)
+        self.assertIn("300块", tools["expenses_add"].description)
+        self.assertIn("expenses_update", tools["expenses_add"].description)  # cross-ref
+        self.assertIn("expenses_mark_paid", tools["expenses_delete"].description)
+
+    def test_annotations_read_vs_destructive(self):
+        tools = {t.name: t for t in run(self.mcp.list_tools())}
+        self.assertTrue(tools["expenses_list"].annotations.readOnlyHint)
+        self.assertTrue(tools["expenses_help"].annotations.readOnlyHint)
+        self.assertTrue(tools["expenses_delete"].annotations.destructiveHint)
+        self.assertFalse(tools["expenses_add"].annotations.readOnlyHint)
+
+    def test_personas_registered(self):
+        prompts = {p.name for p in run(self.mcp.list_prompts())}
+        self.assertEqual(prompts, {"jizhang", "duizhang", "xiufu"})
+
+    def test_numeric_amount_accepted(self):
+        # agents often pass numbers, not strings — must not be rejected
+        added = self.call("expenses_add", amount=300, description="足球课")
+        self.assertEqual(added["amount"], 300.0)
+
+    def test_add_already_paid_in_one_call(self):
+        added = self.call("expenses_add", amount="300", description="足球课",
+                          paid=True, submitted_by="Wei")
+        self.assertTrue(added["paid"])
+        self.assertRegex(added["paid_date"], r"^\d{4}-\d{2}-\d{2}$")
+        hist = self.call("expenses_history", expense_id=added["id"])
+        self.assertEqual([h["action"] for h in hist["history"]], ["create", "mark_paid"])
+
+    def test_write_results_carry_unpaid_total_note(self):
+        added = self.call("expenses_add", amount="300", description="足球课")
+        self.assertIn("unpaid total", added["note"])
+        paid = self.call("expenses_mark_paid", expense_id=added["id"])
+        self.assertIn("¥0.00", paid["note"])
+
+    def test_error_strings_coach_the_agent(self):
+        from mcp.server.fastmcp.exceptions import ToolError
+        with self.assertRaises(ToolError) as ctx:
+            run(self.mcp.call_tool("expenses_add", {"amount": "三百", "description": "x"}))
+        self.assertIn("300块", str(ctx.exception))  # tells the agent what works
+        with self.assertRaises(ToolError) as ctx:
+            run(self.mcp.call_tool("expenses_add", {"amount": "300", "date": "昨天"}))
+        self.assertIn("omit", str(ctx.exception))  # tells it dates can be omitted
+        self.call("expenses_add", amount="300", description="足球课")
+        with self.assertRaises(ToolError) as ctx:
+            run(self.mcp.call_tool("expenses_update", {"query": "足球"}))
+        self.assertIn("expenses_mark_paid", str(ctx.exception))  # redirects
 
 
 class BearerMiddlewareTests(unittest.TestCase):
