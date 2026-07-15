@@ -14,6 +14,17 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: health + portal routes OK.
 
+## [0.4.4] — 2026-07-15
+
+### Operations and verification
+- The live smoke now covers portal update, mark-paid, unmark-paid, exact audit
+  history, and a real MCP `ClientSession` handshake with the exact nine-tool
+  and three-prompt inventories plus bilingual natural-input, ambiguity,
+  correction, fuzzy-payment, history, and cleanup flows.
+- `/favicon.ico` returns 204 so mobile/browser acceptance runs have a clean
+  console instead of a cosmetic missing-favicon error.
+- Suite 74 → **75**.
+
 ## [0.4.3] — 2026-07-15
 
 ### Fixed

@@ -16,6 +16,7 @@ expense and revokes the link. Exits non-zero on any failure.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 import urllib.error
@@ -65,6 +66,77 @@ def post(base: str, name: str, **body):
         return json.loads(r.read())
 
 
+def _tool_payload(result):
+    structured = getattr(result, "structuredContent", None)
+    if structured is not None:
+        return structured.get("result", structured)
+    return json.loads(result.content[0].text)
+
+
+async def exercise_public_mcp(base: str) -> None:
+    """Use the real MCP client stack for inventory and conversational flows."""
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    created_ids: list[str] = []
+    async with streamablehttp_client(f"{base}/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            prompts = await session.list_prompts()
+            expected_tools = {
+                "expenses_help", "expenses_list", "expenses_add",
+                "expenses_mark_paid", "expenses_update", "expenses_delete",
+                "expenses_history", "expenses_mint_link", "expenses_revoke_link",
+            }
+            assert {tool.name for tool in tools.tools} == expected_tools
+            assert {prompt.name for prompt in prompts.prompts} == {
+                "jizhang", "duizhang", "xiufu",
+            }
+            try:
+                chinese = _tool_payload(await session.call_tool("expenses_add", {
+                    "amount": "¥13.57", "description": "[smoke-mcp] 足球课",
+                    "submitted_by": "smoke-mcp",
+                }))
+                created_ids.append(chinese["id"])
+                english = _tool_payload(await session.call_tool("expenses_add", {
+                    "amount": "9.43 rmb", "description": "[smoke-mcp] football gear",
+                    "submitted_by": "smoke-mcp",
+                }))
+                created_ids.append(english["id"])
+
+                listed = _tool_payload(await session.call_tool(
+                    "expenses_list", {"status": "unpaid", "query": "smoke-mcp"}
+                ))
+                assert {e["id"] for e in listed["expenses"]} == set(created_ids)
+
+                ambiguous = _tool_payload(await session.call_tool(
+                    "expenses_delete", {"query": "smoke-mcp"}
+                ))
+                assert ambiguous["matched"] == 2 and len(ambiguous["candidates"]) == 2
+
+                corrected = _tool_payload(await session.call_tool(
+                    "expenses_update", {"expense_id": chinese["id"], "amount": "14.25块"}
+                ))
+                assert corrected["amount"] == 14.25
+                paid = _tool_payload(await session.call_tool(
+                    "expenses_mark_paid", {"query": "足球课"}
+                ))
+                assert paid["id"] == chinese["id"] and paid["paid"]
+                history = _tool_payload(await session.call_tool(
+                    "expenses_history", {"expense_id": chinese["id"]}
+                ))
+                assert [h["action"] for h in history["history"]] == [
+                    "create", "update", "mark_paid",
+                ]
+            finally:
+                for expense_id in created_ids:
+                    await session.call_tool(
+                        "expenses_delete",
+                        {"expense_id": expense_id, "changed_by": "smoke-mcp"},
+                    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", required=True, help="deployed service URL")
@@ -112,13 +184,25 @@ def main() -> int:
         out = post(base, "list", token=token, status="unpaid")
         check("list shows it", any(e["id"] == eid for e in out["expenses"]))
 
+        out = post(base, "update", token=token, id=eid, changed_by="smoke",
+                   fields={"amount": 2.34, "description": "[smoke] updated"})
+        check("update", out["expense"]["amount"] == 2.34 and
+              out["expense"]["description"] == "[smoke] updated")
+
         out = post(base, "mark-paid", token=token, id=eid,
                    paid=True, paid_date="2026-01-02", changed_by="smoke")
         check("mark paid", out["expense"]["paid"])
 
+        out = post(base, "mark-paid", token=token, id=eid,
+                   paid=False, changed_by="smoke")
+        check("unmark paid", not out["expense"]["paid"] and
+              out["expense"]["paid_date"] is None)
+
         out = post(base, "history", token=token, id=eid)
         actions = [h["action"] for h in out["history"]]
-        check("history atomic trail", actions == ["create", "mark_paid"], str(actions))
+        check("history atomic trail", actions == [
+            "create", "update", "mark_paid", "unmark_paid"
+        ], str(actions))
 
         out = post(base, "delete", token=token, id=eid, changed_by="smoke")
         check("delete (cleanup)", out["ok"])
@@ -126,13 +210,25 @@ def main() -> int:
 
         status, _ = get(f"{base}/health")  # still alive after the workout
         check("service healthy after flow", status == 200)
+
+        print("4. Public MCP client + bilingual conversational flow")
+        try:
+            asyncio.run(exercise_public_mcp(base))
+            check("initialize, 9 tools, 3 prompts, bilingual writes/reads/cleanup", True)
+        except Exception as exc:
+            check("public MCP gate", False, f"{type(exc).__name__}: {exc}")
     finally:
-        print("4. Cleanup")
+        print("5. Cleanup")
         if eid:
             try:
                 post(base, "delete", token=token, id=eid, changed_by="smoke")
             except Exception:
                 print("  ! could not delete smoke expense — remove '[smoke]' row manually")
+        for expense in store.find("smoke-mcp"):
+            try:
+                store.delete(expense.id, changed_by="smoke-cleanup")
+            except Exception:
+                print("  ! could not delete MCP smoke expense — remove it manually")
         check("smoke link revoked", store.revoke_token(token))
 
     print("\nRESULT:", "FAIL — see ✗ above" if FAILED else

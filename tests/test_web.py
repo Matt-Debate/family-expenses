@@ -33,6 +33,9 @@ class PortalPageTests(unittest.TestCase):
             self.assertEqual(r.status_code, 200, path)
             self.assertEqual(r.json(), {"ok": True})
 
+    def test_favicon_request_is_quiet(self):
+        self.assertEqual(self.client.get("/favicon.ico").status_code, 204)
+
     def test_portal_served_for_valid_token(self):
         r = self.client.get(f"/t/{self.token}")
         self.assertEqual(r.status_code, 200)

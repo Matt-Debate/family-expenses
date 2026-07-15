@@ -111,7 +111,7 @@ available at `http://localhost:8080`.
 
 ## Deployment status
 
-As of 2026-07-15, version 0.4.3 is being prepared for first deployment. The
+As of 2026-07-15, version 0.4.4 is being prepared for first deployment. The
 one-time deployment checklist remains in `CLAUDE.md`; consult it before any
 deployment work. In particular, the Cloud Run service name and region become
 permanent compatibility constraints, production must remain unauthenticated,

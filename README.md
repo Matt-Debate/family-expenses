@@ -38,7 +38,7 @@ Built to replace free-text WeChat messages — not a business system.
 
 ```bash
 pip install -r requirements.txt
-python3 -m unittest discover -s tests        # 74 tests, sqlite, no DB server
+python3 -m unittest discover -s tests        # 75 tests, sqlite, no DB server
 python3 -m app.main                          # http://localhost:8080
 python3 scripts/mint_link.py --label wife --base-url http://localhost:8080
 ```
@@ -48,5 +48,5 @@ Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
 
 ## Status
 
-**v0.4.3** — production-hardened for first deploy (see `docs/CHANGELOG.md`).
+**v0.4.4** — production-hardened for first deploy (see `docs/CHANGELOG.md`).
 Developed on `claude/family-expenses-setup-8uvrks`.

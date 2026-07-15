@@ -11,7 +11,7 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from .api import HANDLERS
@@ -35,6 +35,9 @@ def build_routes(store: Store) -> list[Route]:
     async def healthz(request: Request):
         return JSONResponse({"ok": True})
 
+    async def favicon(request: Request):
+        return Response(status_code=204)
+
     async def portal(request: Request):
         token = request.path_params["token"]
         if store.validate_token(token) is None:
@@ -57,6 +60,7 @@ def build_routes(store: Store) -> list[Route]:
     routes = [
         Route("/health", healthz, methods=["GET"]),
         Route("/healthz", healthz, methods=["GET"]),
+        Route("/favicon.ico", favicon, methods=["GET"]),
         Route("/t/{token}", portal, methods=["GET"]),
     ]
     routes += [

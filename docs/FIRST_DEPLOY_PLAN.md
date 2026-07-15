@@ -14,7 +14,7 @@ production-hardening, infrastructure, deployment, and acceptance work.
 - Repository: public GitHub repository `Matt-Debate/Test`.
 - Only branch: `claude/family-expenses-setup-8uvrks`, which is also the
   repository's current default branch. There is no `main` branch yet.
-- Application version: 0.4.3 production-hardening release candidate.
+- Application version: 0.4.4 production-hardening release candidate.
 - Local verification on 2026-07-15: `Ran 63 tests in 0.421s` and `OK`.
 - Test run also emits an unclosed asyncio event-loop `ResourceWarning`; it is
   not a failing assertion, but should be removed before release so warnings do
