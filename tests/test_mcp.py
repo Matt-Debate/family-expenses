@@ -26,6 +26,8 @@ EXPECTED_TOOLS = {
     "expenses_mint_link", "expenses_revoke_link",
 }
 
+_TEST_LOOP = asyncio.new_event_loop()
+
 
 def make_store() -> Store:
     db = Database("sqlite:///:memory:")
@@ -34,7 +36,11 @@ def make_store() -> Store:
 
 
 def run(coro):
-    return asyncio.new_event_loop().run_until_complete(coro)
+    return _TEST_LOOP.run_until_complete(coro)
+
+
+def tearDownModule():
+    _TEST_LOOP.close()
 
 
 def tool_payload(result) -> dict | list:
@@ -306,6 +312,53 @@ class CombinedAppTests(unittest.TestCase):
                 # MCP open when no secret configured: transport answers (405
                 # for plain GET without SSE accept), not 401/503 gatekeeping.
                 self.assertNotIn(client.get("/mcp").status_code, (401, 503))
+        finally:
+            os.environ.pop("DATABASE_URL", None)
+
+    def test_cloud_run_host_completes_initialize_and_tools_list(self):
+        os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+        os.environ.pop("MCP_SECRET", None)
+        try:
+            from app.main import build_asgi_app
+
+            headers = {
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+            }
+            initialize = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "cloud-run-gate", "version": "1"},
+                },
+            }
+            tools_list = {
+                "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}
+            }
+            initialized_notification = {
+                "jsonrpc": "2.0", "method": "notifications/initialized", "params": {}
+            }
+            with TestClient(
+                build_asgi_app(),
+                base_url="https://family-expenses-test.asia-southeast1.run.app",
+            ) as client:
+                initialized = client.post("/mcp", headers=headers, json=initialize)
+                notified = client.post(
+                    "/mcp", headers=headers, json=initialized_notification
+                )
+                listed = client.post("/mcp", headers=headers, json=tools_list)
+
+            self.assertEqual(initialized.status_code, 200, initialized.text)
+            self.assertEqual(notified.status_code, 202, notified.text)
+            self.assertEqual(listed.status_code, 200, listed.text)
+            self.assertIn("serverInfo", initialized.json()["result"])
+            self.assertEqual(
+                {tool["name"] for tool in listed.json()["result"]["tools"]},
+                EXPECTED_TOOLS,
+            )
         finally:
             os.environ.pop("DATABASE_URL", None)
 

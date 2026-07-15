@@ -30,7 +30,7 @@ annotations. Server `instructions` is bonus, never the only home of a rule.
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 63 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 74 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link
 DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post-deploy
@@ -59,9 +59,9 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 
 ## Current state (2026-07-14) & next-session checklist (PC, one-time)
 
-v0.4.1, code-complete, **not yet deployed** (cloud session had no gcloud/
-Docker daemon; production entrypoint rehearsed OK). Delete this section when
-the checklist is done.
+v0.4.2, production-hardening in progress, **not yet deployed**. The reviewed
+first-deploy plan is `docs/FIRST_DEPLOY_PLAN.md`. Delete this section when the
+checklist is done.
 
 1. **Rename repo** `Test` → `family-expenses` (GitHub → Settings → rename;
    old remote URLs redirect, so existing clones keep working).
@@ -69,17 +69,12 @@ the checklist is done.
    opened; merge locally or open one).
 3. **Neon**: create a dedicated project (separate from any business DB),
    copy the `postgres://…` connection string.
-4. **Deploy** (service name + region are PERMANENT — compatibility contract):
-   ```bash
-   gcloud builds submit . --config=cloudbuild.yaml
-   gcloud run deploy family-expenses \
-     --image=gcr.io/$PROJECT_ID/family-expenses:latest \
-     --region=<pick-once> --allow-unauthenticated \
-     --set-env-vars=DATABASE_URL='postgres://…'
-   ```
-   (Do NOT set `MCP_SECRET`.)
-5. **Verify live** — the one thing sqlite tests can't prove (schema on real
-   Postgres + public URL end-to-end):
+4. **Deploy** with `scripts/deploy.sh` after its dry-run gate. The script pins
+   the permanent service `family-expenses` in `asia-southeast1`, deploys a
+   SHA-tagged image, binds the pooled Neon URI from Secret Manager, and leaves
+   `MCP_SECRET` unset.
+5. **Verify live** through the pooled Neon URI — the one thing sqlite tests
+   can't prove (pooler behavior, schema on real Postgres, public URL):
    ```bash
    DATABASE_URL='postgres://…' python3 scripts/smoke_live.py \
      --base-url https://<service-url>

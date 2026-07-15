@@ -4,10 +4,8 @@
 # base, requirements layer first for caching, no frontend build stage needed
 # (the portal is one self-contained HTML file served by the app).
 #
-# Deploy (see docs/RUNBOOK.md):
-#   gcloud builds submit . --config=cloudbuild.yaml
-#   gcloud run deploy family-expenses --image=... \
-#     --set-env-vars=DATABASE_URL=...,MCP_SECRET=...
+# Deploy the clean, SHA-pinned image with scripts/deploy.sh. The script binds
+# DATABASE_URL from Secret Manager and deliberately leaves MCP_SECRET unset.
 
 FROM python:3.11-slim
 

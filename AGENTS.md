@@ -6,6 +6,22 @@ queries and manages them through MCP clients such as Claude and ChatGPT.
 This is not a business system. The owner's `work-dashboards` repository is
 reference-only: never commit changes to it while working on this project.
 
+## Repository identity and companion routing
+
+The stable local path for this repository is
+`/Users/matthewalanfarmer/family-expenses`. It currently resolves to the
+legacy checkout `/Users/matthewalanfarmer/Test`; treat both paths as the same
+repository. The companion Work Dashboards checkout is
+`/Users/matthewalanfarmer/work_dashboards` and has its own `AGENTS.md` and
+`CLAUDE.md`.
+
+The user may operate on both repositories in one conversation. Route Family
+Expenses portal, `/t/<token>`, `expenses_*` MCP, and household-deployment work
+here. Route Work Dashboards product work to the companion checkout. If a
+referenced commit or file is absent from the current checkout, check the
+companion repository before reporting it missing. Never mix changes from the
+two projects in one commit.
+
 ## Highest-priority compatibility contract
 
 No change may force the family member to reconnect, re-authenticate, or
@@ -95,7 +111,7 @@ available at `http://localhost:8080`.
 
 ## Deployment status
 
-As of 2026-07-14, version 0.4.1 is code-complete but not deployed. The
+As of 2026-07-15, version 0.4.2 is being prepared for first deployment. The
 one-time deployment checklist remains in `CLAUDE.md`; consult it before any
 deployment work. In particular, the Cloud Run service name and region become
 permanent compatibility constraints, production must remain unauthenticated,

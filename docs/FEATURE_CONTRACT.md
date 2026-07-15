@@ -166,7 +166,10 @@ mark paid" with date, paid/unpaid filter, running totals.
   phrases return candidates rather than acting on a guess.
 - **A8** No release may require re-authentication, reconnection, or
   reconfiguration by a link/connector holder (§5.1). Zero-credential
-  operation is permanent unless the owner explicitly trades it away.
+  operation is permanent unless the owner explicitly trades it away. A warm
+  service must recover its stale pooled Postgres connection on the first
+  request after a long idle period without user action; Cloud Run must refuse
+  to start rather than silently fall back to ephemeral SQLite.
 
 ## 10. Versioning & docs
 

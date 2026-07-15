@@ -14,6 +14,37 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: healthz + portal routes OK.
 
+## [0.4.2] — 2026-07-15
+First-deployment hardening: the public MCP, pooled Postgres lifecycle, and
+Cloud Run storage posture now fail safely under the production conditions the
+local SQLite suite cannot reproduce.
+
+### Fixed
+- FastMCP binds its host policy to runtime `HOST` (default `0.0.0.0`), so a
+  real Cloud Run Host header completes initialize and `tools/list` instead of
+  returning 421. Stateless HTTP returns JSON responses, avoiding the SDK's
+  unclosed SSE receive-stream warning while remaining protocol-compliant.
+- Postgres thread-local connections evict closed handles and retry a failed
+  first transaction statement once on a fresh connection. Mid-transaction
+  failures are never replayed; the poisoned connection is evicted and rollback
+  failure cannot mask the original error.
+- Cloud Run (`K_SERVICE`) refuses to boot without a Postgres `DATABASE_URL`,
+  preventing a missing secret binding from silently writing to ephemeral
+  SQLite.
+- Async MCP tests now close their event loops and complete the initialized
+  notification handshake, removing lifecycle warnings from the release gate.
+
+### Operations
+- Added `scripts/deploy.sh`: clean-tree guard, explicit SHA build/deploy,
+  Secret Manager binding, no `MCP_SECRET`, finite scale, and permanent
+  Singapore region/service constants.
+- Cloud Build no longer publishes or deploys a mutable `latest` image.
+- Live smoke requires the Neon pooled URI and repeats token validation at
+  least six times to cross psycopg's default prepared-statement threshold.
+- Added regression/static gates for reconnect, production fail-closed,
+  external-host MCP, pooled validation, and deployment contract. Suite 63 →
+  **74**.
+
 ## [0.4.1] — 2026-07-14
 Owner's final risk ranking encoded: the dominant risk is a family member
 being forced to reconnect (→ disuse), not unauthorized edits.

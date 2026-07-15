@@ -21,6 +21,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -28,6 +29,19 @@ from app.db import Database  # noqa: E402
 from app.store import Store  # noqa: E402
 
 FAILED = False
+
+
+def is_neon_pooled_url(url: str) -> bool:
+    """Return whether a Postgres URL names Neon's pooled endpoint."""
+    hostname = urlparse(url).hostname or ""
+    return "-pooler." in hostname and hostname.endswith("neon.tech")
+
+
+def exercise_pooled_token_gate(store, token: str, repetitions: int = 6) -> bool:
+    """Cross psycopg's default prepare threshold on the runtime query shape."""
+    if repetitions < 6:
+        raise ValueError("pooled token gate requires at least six repetitions")
+    return all(store.validate_token(token) is not None for _ in range(repetitions))
 
 
 def check(label: str, ok: bool, detail: str = "") -> None:
@@ -60,12 +74,19 @@ def main() -> int:
     store = Store(Database())  # requires DATABASE_URL env
     if not store.db.is_pg:
         print("  ✗ DATABASE_URL is not set to a postgres:// URL"); return 1
+    if not is_neon_pooled_url(store.db.url):
+        print("  ✗ DATABASE_URL must be the Neon pooled URI for the runtime gate")
+        return 1
     store.db.init()  # idempotent — proves the portable DDL on real PG
     check("schema.sql applied idempotently to Postgres", True)
 
     minted = store.mint_token(label="smoke-test")
     token = minted["token"]
     check("temporary smoke link minted", len(token) == 64)
+    check(
+        "pooled token validation repeated 6x (prepared-statement threshold)",
+        exercise_pooled_token_gate(store, token),
+    )
 
     eid = None
     try:

@@ -1,6 +1,6 @@
 # First Deployment and Verification Plan
 
-**Status:** proposed
+**Status:** in progress — Wave 1 implementation
 **Prepared:** 2026-07-15
 **Scope:** take the code-complete Family Expenses app from its current local
 state to a verified first production deployment without breaking the
@@ -14,7 +14,7 @@ production-hardening, infrastructure, deployment, and acceptance work.
 - Repository: public GitHub repository `Matt-Debate/Test`.
 - Only branch: `claude/family-expenses-setup-8uvrks`, which is also the
   repository's current default branch. There is no `main` branch yet.
-- Application version: 0.4.1 plus unreleased handoff documentation.
+- Application version: 0.4.2 production-hardening release candidate.
 - Local verification on 2026-07-15: `Ran 63 tests in 0.421s` and `OK`.
 - Test run also emits an unclosed asyncio event-loop `ResourceWarning`; it is
   not a failing assertion, but should be removed before release so warnings do
@@ -41,7 +41,7 @@ before the first deploy:
 |---|---|---|
 | GCP project | `work-dashboards` | Reuses the working operator identity and enabled APIs while keeping the family service, service account, secret, image, and database separate. |
 | Cloud Run service | `family-expenses` | Contract and runbook name. Never rename after a link or connector is distributed. |
-| Cloud Run region | `asia-northeast1` | Tokyo is the established Work Dashboards region and is preferable to the current gcloud default of `us-east1` for a Shanghai household. Never change after onboarding. |
+| Cloud Run region | `asia-southeast1` | Singapore colocates the service with the Neon database. Each portal/API request makes multiple serialized database round trips, so avoiding Tokyo↔Singapore latency outweighs the smaller difference in the household's client hop. Verified available in Cloud Run before implementation. Never change after onboarding. |
 | Neon project | `family-expenses` | Structural separation from business data. |
 | Neon region | `aws-ap-southeast-1` | Singapore is the available nearby Neon region and matches the organization's working deployment pattern. |
 | App timezone | `Asia/Shanghai` | Required for natural-language meanings of "today". |
@@ -52,7 +52,21 @@ before the first deploy:
 
 Complete this wave before creating permanent production resources.
 
-1. Fix FastMCP external-host handling.
+1. Fix stale Postgres connection recovery and production storage posture.
+   - Evict a cached psycopg connection when it is already closed.
+   - If the first statement in a transaction discovers a stale connection,
+     reconnect and retry that statement once. Never replay after any statement
+     has succeeded; partial transaction replay would violate atomicity.
+   - If a mid-transaction connection error or rollback-on-dead-connection
+     occurs, preserve the original exception and evict the cached corpse so
+     the next request can recover.
+   - When `K_SERVICE` is set, refuse startup unless `DATABASE_URL` is a
+     `postgres://` or `postgresql://` URL. Never allow production to fall back
+     to an ephemeral SQLite file.
+   - Add tests for closed cached connection, stale first statement,
+     rollback failure, and both missing/non-Postgres production URLs.
+
+2. Fix FastMCP external-host handling.
    - Construct `FastMCP` with the runtime host (`HOST`, default
      `0.0.0.0`) instead of its localhost default.
    - Add a regression test that sends a realistic Cloud Run `Host` header to
@@ -62,7 +76,7 @@ Complete this wave before creating permanent production resources.
      non-local host, so the present build would likely reject Cloud Run MCP
      traffic even though `/healthz` works.
 
-2. Add a repeatable deployment script.
+3. Add a repeatable deployment script.
    - Pin project, service name, and region as explicit constants.
    - Refuse a dirty working tree unless an explicit override is supplied.
    - Resolve the Git commit SHA, pass it to manual Cloud Build as
@@ -79,7 +93,7 @@ Complete this wave before creating permanent production resources.
    - Resolve and print the service URL after deployment, then fail if it is
      empty.
 
-3. Add deployment-contract tests or static checks.
+4. Add deployment-contract tests or static checks.
    - Manual builds must supply `COMMIT_SHA`; a missing value currently becomes
      an empty image tag.
    - The deploy target must remain `family-expenses` in
@@ -90,7 +104,7 @@ Complete this wave before creating permanent production resources.
    - The deployment script must not reference the Work Dashboards database
      secret.
 
-4. Clean up release hygiene.
+5. Clean up release hygiene.
    - Resolve the asyncio lifecycle warning.
    - Correct stale deployment comments that still demonstrate setting
      `MCP_SECRET`.
@@ -106,7 +120,7 @@ Run in a clean Python 3.11 environment:
 python3 -m unittest discover -s tests
 ```
 
-Required result: zero failures, zero errors, no unclosed-loop warning, all
+Required result: zero failures, zero errors, no lifecycle warning, all
 compatibility tests green, and the new external-host MCP test green. Also run
 the deployment script in dry-run mode and inspect the literal commands for
 project, region, service, SHA image, secret binding, and absence of
@@ -114,7 +128,9 @@ project, region, service, SHA image, secret binding, and absence of
 
 ## Wave 2 — repository release preparation
 
-1. Commit `AGENTS.md` and the Wave 1 implementation on the current branch.
+1. Commit the reviewed Wave 1 implementation and synchronized docs on the
+   current branch. (`AGENTS.md` was already introduced by `3bf22b7`; do not
+   describe it as newly added.)
 2. Create a pull request or review the complete diff against an empty `main`
    baseline; do not deploy an uncommitted tree.
 3. Create `main` from the reviewed branch, make `main` the default, and retain
@@ -140,8 +156,8 @@ project, region, service, SHA image, secret binding, and absence of
    `family-expenses` in `aws-ap-southeast-1`; never reuse the
    `work_dashboards` project, branch, role, or connection string.
 2. Wait for Neon operations to finish before connecting.
-3. Retrieve a pooled connection URI for runtime use and a direct URI for
-   schema/diagnostic work if needed.
+3. Retrieve a pooled connection URI for runtime and integration gates and a
+   direct URI only for `psql` schema diagnostics if needed.
 4. Create Secret Manager secret `family-expenses-database-url`, add the pooled
    URI as version 1, and grant Secret Accessor only to a dedicated
    `family-expenses` Cloud Run service account.
@@ -154,7 +170,10 @@ project, region, service, SHA image, secret binding, and absence of
 - Run `Database.init()` twice against Neon; both applications must succeed.
 - Use `psql` to verify all three tables, constraints, and indexes.
 - Run CRUD, mark-paid/unpaid, delete, token validation/revocation, and history
-  reads against the real Postgres project.
+  reads through the pooled URI against the real Postgres project.
+- Repeat the identical token-validation query shape at least six times through
+  the pooled URI, crossing psycopg's default prepare threshold so pooler-only
+  prepared-statement failures cannot hide behind a direct connection test.
 - Force a history-write failure and verify the expense mutation rolls back.
 - Verify `paid=true` without `paid_date` fails at the database constraint.
 - Verify temporary smoke rows and tokens are deleted/revoked before moving on.
@@ -166,7 +185,7 @@ This is the point where the service name and region become permanent.
 
 1. Build the reviewed commit in Cloud Build with the explicit commit SHA.
 2. Deploy the SHA-pinned image to service `family-expenses` in
-   `asia-northeast1` using the dedicated service account and database secret.
+   `asia-southeast1` using the dedicated service account and database secret.
 3. Keep ingress public, leave `MCP_SECRET` unset, and set
    `APP_TZ=Asia/Shanghai`.
 4. Record the assigned `run.app` URL in the operator runbook. Never replace it
@@ -177,8 +196,8 @@ This is the point where the service name and region become permanent.
 
 ### Wave 4 deployed-service test gate
 
-Run `scripts/smoke_live.py` with the direct Neon URI injected only into that
-process. It must prove schema initialization and the public portal/API flow,
+Run `scripts/smoke_live.py` with the pooled Neon URI injected only into that
+process. It must prove pooler compatibility, schema initialization, and the public portal/API flow,
 then clean up its temporary expense and revoke its temporary token.
 
 Add these checks beyond the current smoke script:
@@ -274,3 +293,6 @@ Do not onboard the family member if any of these remains true:
 - A secret or real portal token appears in source control or logs generated by
   the release process.
 - The compatibility redeploy drill fails.
+- A closed or long-idle pooled Postgres connection requires a second user
+  request, service restart, or any manual recovery.
+- Cloud Run can boot without a Postgres `DATABASE_URL` secret binding.

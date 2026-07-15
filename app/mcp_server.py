@@ -71,6 +71,8 @@ def build_mcp(store: Store) -> FastMCP:
         "family-expenses",
         instructions=_HELP,  # bonus for clients that surface it
         stateless_http=True,
+        json_response=True,
+        host=os.environ.get("HOST", "0.0.0.0"),
     )
 
     # ── helpers ───────────────────────────────────────────────────────────

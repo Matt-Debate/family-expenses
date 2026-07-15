@@ -12,14 +12,14 @@ no manual migration step for v1.
 
 ### Deploy to Cloud Run
 ```bash
-# from the repo root
-gcloud builds submit . --config=cloudbuild.yaml
-
-gcloud run deploy family-expenses \
-  --image=gcr.io/$PROJECT_ID/family-expenses:latest \
-  --region=<your-region> --allow-unauthenticated \
-  --set-env-vars=DATABASE_URL='postgres://…'
+# after creating the dedicated service account and Secret Manager binding
+scripts/deploy.sh --dry-run
+scripts/deploy.sh
 ```
+The script permanently pins service `family-expenses` in
+`asia-southeast1` (Singapore, colocated with Neon), builds and deploys the
+current clean Git SHA, and binds `DATABASE_URL` from
+`family-expenses-database-url`. Production refuses to boot on SQLite.
 Auth posture (final): links never expire, `/mcp` is open, nobody ever
 re-authenticates. `APP_TZ` (default `Asia/Shanghai`) controls what "today"
 means for default dates.
@@ -54,9 +54,8 @@ to renew, ever.
 ## 3. Connect MCP clients
 
 - **Claude (claude.ai / Claude Code):** add a custom connector / MCP server
-  with URL `https://<service-url>/mcp`. Add the bearer header only if you set
-  `MCP_SECRET`.
-- **ChatGPT (developer mode):** same URL (+ header if gated).
+  with URL `https://<service-url>/mcp`. Do not add an authorization header.
+- **ChatGPT (developer mode):** same URL, no authorization header.
 
 Tools: `expenses_help`, `expenses_list`, `expenses_add`, `expenses_update`,
 `expenses_mark_paid`, `expenses_delete`, `expenses_history`,
@@ -90,7 +89,9 @@ assistant asks which one — nothing is guessed silently.
 
 - Lost or leaked link: `expenses_revoke_link` (or
   `scripts/mint_link.py --revoke <token-or-id>`), then mint a new one.
-- Rotate the MCP secret by redeploying with a new `MCP_SECRET`.
+- Do not set or rotate an MCP secret; the no-header connector posture is a
+  permanent compatibility constraint. If abuse ever requires changing it,
+  treat that as an explicit owner-approved breaking operational change.
 - Inspect links: `scripts/mint_link.py --list` (shows label, expiry, usage).
 
 ## 6. Operations notes
@@ -108,7 +109,7 @@ assistant asks which one — nothing is guessed silently.
 
 ```bash
 pip install -r requirements.txt
-python3 -m unittest discover -s tests        # 51 tests, sqlite, no server
+python3 -m unittest discover -s tests        # 74 tests, sqlite, no server
 python3 scripts/mint_link.py --label dev     # local sqlite file
 python3 -m app.main                          # http://localhost:8080
 ```
