@@ -14,7 +14,7 @@ production-hardening, infrastructure, deployment, and acceptance work.
 - Repository: public GitHub repository `Matt-Debate/Test`.
 - Only branch: `claude/family-expenses-setup-8uvrks`, which is also the
   repository's current default branch. There is no `main` branch yet.
-- Application version: 0.4.2 production-hardening release candidate.
+- Application version: 0.4.3 production-hardening release candidate.
 - Local verification on 2026-07-15: `Ran 63 tests in 0.421s` and `OK`.
 - Test run also emits an unclosed asyncio event-loop `ResourceWarning`; it is
   not a failing assertion, but should be removed before release so warnings do
@@ -202,7 +202,9 @@ then clean up its temporary expense and revoke its temporary token.
 
 Add these checks beyond the current smoke script:
 
-- `/healthz` returns 200 on a cold and warm request.
+- `/health` returns 200 on a cold and warm request. Do not use `/healthz` for
+  the public gate: Cloud Run reserves some paths ending in `z` and intercepts
+  it before the container.
 - Invalid portal token returns 404.
 - Valid temporary portal link loads the Chinese UI.
 - Add, list, edit, mark paid, unmark paid, history, and delete all work through

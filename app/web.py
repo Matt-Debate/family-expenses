@@ -55,6 +55,7 @@ def build_routes(store: Store) -> list[Route]:
         return endpoint
 
     routes = [
+        Route("/health", healthz, methods=["GET"]),
         Route("/healthz", healthz, methods=["GET"]),
         Route("/t/{token}", portal, methods=["GET"]),
     ]

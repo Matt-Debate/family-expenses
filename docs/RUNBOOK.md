@@ -99,6 +99,8 @@ assistant asks which one — nothing is guessed silently.
 - **Backups:** rely on Neon's point-in-time restore; the `expense_history`
   table is additionally an application-level audit of every change.
 - **Logs:** Cloud Run request logs; the app logs via uvicorn.
+- **Health:** use `GET /health` in Cloud Run checks. `/healthz` is retained
+  locally, but Google's front end reserves some paths ending in `z`.
 - **Scale:** min-instances=0 is fine (stateless HTTP MCP; Neon serverless).
   Cold starts of a couple seconds are acceptable for this use.
 - **Schema changes:** v1 applies `db/schema.sql` idempotently at startup.

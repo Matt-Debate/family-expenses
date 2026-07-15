@@ -91,8 +91,8 @@ def main() -> int:
     eid = None
     try:
         print("2. Deployed service over the public URL")
-        status, _ = get(f"{base}/healthz")
-        check("GET /healthz", status == 200)
+        status, _ = get(f"{base}/health")
+        check("GET /health", status == 200)
 
         status, html = get(f"{base}/t/{token}")
         check("portal page serves for valid token", status == 200 and "家庭开支" in html)
@@ -124,7 +124,7 @@ def main() -> int:
         check("delete (cleanup)", out["ok"])
         eid = None
 
-        status, _ = get(f"{base}/healthz")  # still alive after the workout
+        status, _ = get(f"{base}/health")  # still alive after the workout
         check("service healthy after flow", status == 200)
     finally:
         print("4. Cleanup")

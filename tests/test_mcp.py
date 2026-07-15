@@ -279,6 +279,7 @@ class CompatibilityContractTests(unittest.TestCase):
         from app.web import build_routes
         paths = {r.path for r in build_routes(make_store())}
         self.assertIn("/t/{token}", paths)
+        self.assertIn("/health", paths)
         self.assertIn("/healthz", paths)
         for name in ("list", "submit", "update", "mark-paid", "delete", "history"):
             self.assertIn(f"/api/{name}", paths)
@@ -307,7 +308,7 @@ class CombinedAppTests(unittest.TestCase):
             from app.main import build_asgi_app
             # context manager runs the MCP session-manager lifespan
             with TestClient(build_asgi_app()) as client:
-                self.assertEqual(client.get("/healthz").status_code, 200)
+                self.assertEqual(client.get("/health").status_code, 200)
                 self.assertEqual(client.get("/t/badtoken").status_code, 404)
                 # MCP open when no secret configured: transport answers (405
                 # for plain GET without SSE accept), not 401/503 gatekeeping.

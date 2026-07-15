@@ -59,7 +59,7 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 
 ## Current state (2026-07-14) & next-session checklist (PC, one-time)
 
-v0.4.2, production-hardening in progress, **not yet deployed**. The reviewed
+v0.4.3, production-hardening in progress, **not yet deployed**. The reviewed
 first-deploy plan is `docs/FIRST_DEPLOY_PLAN.md`. Delete this section when the
 checklist is done.
 

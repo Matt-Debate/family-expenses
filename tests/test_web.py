@@ -28,9 +28,10 @@ class PortalPageTests(unittest.TestCase):
         self.client, self.store, self.token = make_client()
 
     def test_healthz(self):
-        r = self.client.get("/healthz")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json(), {"ok": True})
+        for path in ("/health", "/healthz"):
+            r = self.client.get(path)
+            self.assertEqual(r.status_code, 200, path)
+            self.assertEqual(r.json(), {"ok": True})
 
     def test_portal_served_for_valid_token(self):
         r = self.client.get(f"/t/{self.token}")

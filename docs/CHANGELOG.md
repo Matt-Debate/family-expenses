@@ -12,7 +12,15 @@ to a release entry when a chunk set ships.
 - `scripts/smoke_live.py`: post-deploy verification — proves schema applies
   to real Postgres and exercises the deployed service end-to-end over the
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
-  $PORT) rehearsed in-session: healthz + portal routes OK.
+  $PORT) rehearsed in-session: health + portal routes OK.
+
+## [0.4.3] — 2026-07-15
+
+### Fixed
+- Added `/health` as the Cloud Run-safe health endpoint and moved live smoke
+  checks to it. `/healthz` remains available locally and for compatibility,
+  but Google's front end reserves some paths ending in `z` and intercepts
+  this one with a 404 before requests reach the container.
 
 ## [0.4.2] — 2026-07-15
 First-deployment hardening: the public MCP, pooled Postgres lifecycle, and

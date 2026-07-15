@@ -48,5 +48,5 @@ Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
 
 ## Status
 
-**v0.4.2** — production-hardened for first deploy (see `docs/CHANGELOG.md`).
+**v0.4.3** — production-hardened for first deploy (see `docs/CHANGELOG.md`).
 Developed on `claude/family-expenses-setup-8uvrks`.

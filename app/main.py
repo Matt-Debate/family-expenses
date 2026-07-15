@@ -1,7 +1,7 @@
 """Entrypoint — one service: portal + JSON API + MCP mount.
 
 Layout:
-  GET  /healthz, /t/<token>, POST /api/*   — household portal (token auth)
+  GET  /health, /healthz, /t/<token>, POST /api/* — portal/API
   /mcp                                     — operator MCP (bearer-secret auth)
 
 Config (env):
