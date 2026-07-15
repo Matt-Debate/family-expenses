@@ -57,33 +57,15 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 - Timestamps are app-managed UTC ISO text; "today" defaults use `APP_TZ`.
 - Development branch: `claude/family-expenses-setup-8uvrks`.
 
-## Current state (2026-07-14) & next-session checklist (PC, one-time)
+## Current state (2026-07-15)
 
-v0.4.4, production-hardening in progress, **not yet deployed**. The reviewed
-first-deploy plan is `docs/FIRST_DEPLOY_PLAN.md`. Delete this section when the
-checklist is done.
+v0.4.4 is deployed and technically accepted. The permanent service is
+`family-expenses` in `asia-southeast1`, backed by the separate Singapore Neon
+project. The public portal and MCP acceptance gates pass at
+`https://family-expenses-bejtu5m47a-as.a.run.app`; see
+`docs/FIRST_DEPLOY_PLAN.md` for the evidence record.
 
-1. **Rename repo** `Test` → `family-expenses` (GitHub → Settings → rename;
-   old remote URLs redirect, so existing clones keep working).
-2. **Merge** `claude/family-expenses-setup-8uvrks` → `main` (no PR was
-   opened; merge locally or open one).
-3. **Neon**: create a dedicated project (separate from any business DB),
-   copy the `postgres://…` connection string.
-4. **Deploy** with `scripts/deploy.sh` after its dry-run gate. The script pins
-   the permanent service `family-expenses` in `asia-southeast1`, deploys a
-   SHA-tagged image, binds the pooled Neon URI from Secret Manager, and leaves
-   `MCP_SECRET` unset.
-5. **Verify live** through the pooled Neon URI — the one thing sqlite tests
-   can't prove (pooler behavior, schema on real Postgres, public URL):
-   ```bash
-   DATABASE_URL='postgres://…' python3 scripts/smoke_live.py \
-     --base-url https://<service-url>
-   ```
-6. **Mint her link**: `python3 scripts/mint_link.py --label wife --base-url
-   https://<service-url>` → send over WeChat → she bookmarks it. Add one on
-   her phone's home screen if you can (Safari/Chrome "Add to Home Screen").
-7. **Connect MCP**: claude.ai / ChatGPT connector, URL
-   `https://<service-url>/mcp`, no header. Try "我还要付什么". Optionally set
-   it up on her app too (personas 记账/对账/修复 appear as prompt templates).
-8. Optional, later: custom domain; Cloud Build trigger on main; check Neon
-   PITR/backups; delete this checklist section.
+Human onboarding remains: mint the real `wife` link only when ready to send it
+privately, bookmark it on her phone, perform one real household flow, and add
+the owner's MCP connector at the stable `/mcp` URL with no authorization
+header. Do not mint or record the real token during automated acceptance.

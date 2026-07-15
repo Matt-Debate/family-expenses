@@ -17,6 +17,10 @@ to a release entry when a chunk set ships.
 ## [0.4.4] — 2026-07-15
 
 ### Operations and verification
+- First production deployment accepted on the permanent Cloud Run service in
+  `asia-southeast1`, backed by an isolated Neon project. The same portal link
+  and public no-header MCP URL survived a revision change; mobile acceptance,
+  runtime-contract inspection, cleanup, and final public smoke all passed.
 - The live smoke now covers portal update, mark-paid, unmark-paid, exact audit
   history, and a real MCP `ClientSession` handshake with the exact nine-tool
   and three-prompt inventories plus bilingual natural-input, ambiguity,

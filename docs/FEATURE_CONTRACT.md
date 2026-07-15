@@ -1,10 +1,10 @@
 # Feature Contract — Family Expenses
 
-**Status:** ACTIVE (v0.4.0 — agent-ergonomics rework, see docs/MCP_DESIGN.md)
+**Status:** ACTIVE (v0.4.4 — first production deployment accepted)
 **Owner:** matt-debate
-**Repo:** `matt-debate/test` (to be renamed `family-expenses`)
-**Branch:** `claude/family-expenses-setup-8uvrks`
-**Date:** 2026-07-14
+**Repo:** `Matt-Debate/family-expenses`
+**Default branch:** `main`
+**Date:** 2026-07-15
 
 ## 1. Purpose
 

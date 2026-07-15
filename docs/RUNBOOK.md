@@ -2,6 +2,10 @@
 
 Operator guide: deploy, mint the household link, connect MCP clients, rotate.
 
+Production service: `family-expenses` in `asia-southeast1` at
+`https://family-expenses-bejtu5m47a-as.a.run.app`. Keep this service, region,
+and URL stable after onboarding.
+
 ## 1. One-time setup
 
 ### Database (Neon)

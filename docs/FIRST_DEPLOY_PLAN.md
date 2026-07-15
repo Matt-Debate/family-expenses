@@ -1,6 +1,6 @@
 # First Deployment and Verification Plan
 
-**Status:** in progress — Wave 1 implementation
+**Status:** technical deployment and acceptance complete; human onboarding pending
 **Prepared:** 2026-07-15
 **Scope:** take the code-complete Family Expenses app from its current local
 state to a verified first production deployment without breaking the
@@ -9,28 +9,22 @@ compatibility contract in `docs/FEATURE_CONTRACT.md` section 5.1.
 The existing implementation plan is complete. This plan covers the remaining
 production-hardening, infrastructure, deployment, and acceptance work.
 
-## Current baseline
+## Deployment record
 
-- Repository: public GitHub repository `Matt-Debate/Test`.
-- Only branch: `claude/family-expenses-setup-8uvrks`, which is also the
-  repository's current default branch. There is no `main` branch yet.
-- Application version: 0.4.4 production-hardening release candidate.
-- Local verification on 2026-07-15: `Ran 63 tests in 0.421s` and `OK`.
-- Test run also emits an unclosed asyncio event-loop `ResourceWarning`; it is
-  not a failing assertion, but should be removed before release so warnings do
-  not hide future lifecycle defects.
-- Nothing family-specific exists in GCP or Neon yet.
-- Available operator access:
-  - GitHub CLI is authenticated as `Matt-Debate`.
-  - gcloud is authenticated as `matthewfarm@gmail.com` against project
-    `work-dashboards`.
-  - Cloud Run, Cloud Build, Secret Manager, Artifact Registry, and Container
-    Registry APIs are enabled.
-  - The Work Dashboards Neon API credential is valid and can create a separate
-    project in the same Neon organization. The only current Neon project is
-    `work_dashboards`.
-  - Local `psql` is available; the local Docker daemon is not. Cloud Build
-    will therefore be the authoritative container build test.
+- Repository: public GitHub repository `Matt-Debate/family-expenses` with
+  `main` as the default branch. The original development branch is retained.
+- Application version: 0.4.4; deployed application commit
+  `4848c850240d85c64829de52e7250f164ea2ce88`.
+- Local verification on 2026-07-15: 75 tests pass under Python 3.11 with
+  `ResourceWarning` promoted to an error; no lifecycle warning remains.
+- Neon project: `family-expenses` (`lively-silence-89972000`) in
+  `aws-ap-southeast-1`, separate from Work Dashboards.
+- Cloud Run service: `family-expenses` in `asia-southeast1`; accepted revision
+  `family-expenses-00004-pvt`, serving 100% of traffic at
+  `https://family-expenses-bejtu5m47a-as.a.run.app`.
+- The runtime uses a dedicated service account and Secret Manager binding,
+  leaves `MCP_SECRET` unset, and deploys the Git-SHA-tagged image at digest
+  `sha256:83f7052cc80ded8c3e783248657a0a45079356a1de3623989ddf3f24c9f07df0`.
 
 ## Locked production choices
 
@@ -97,7 +91,7 @@ Complete this wave before creating permanent production resources.
    - Manual builds must supply `COMMIT_SHA`; a missing value currently becomes
      an empty image tag.
    - The deploy target must remain `family-expenses` in
-     `asia-northeast1`.
+     `asia-southeast1`.
    - The deployed image must be SHA-pinned.
    - `DATABASE_URL` must come from the family secret.
    - `MCP_SECRET` must be absent.
@@ -245,7 +239,27 @@ Required acceptance evidence:
 - A8: same portal link and MCP URL survive a new Cloud Run revision without
   reconfiguration.
 
-## Wave 6 — onboarding and release
+### Recorded acceptance evidence (2026-07-15)
+
+- A1 passed in Playwright at 320, 390, and 430 px: Chinese default, English
+  toggle, add, edit, paid/unpaid, filters, totals, history, persistence, and
+  reload; no horizontal overflow or browser-console errors remained.
+- A2/A4/A5/A6 passed in the 75-test SQLite suite and the pooled Neon gate,
+  including forced-history rollback, the paid-date database constraint,
+  token rejection/revocation, repeated prepared-query shape, and cleanup.
+- A3/A7 passed through a real public MCP `ClientSession`: initialize, exact
+  nine-tool and three-prompt inventories, Chinese and English spoken amounts,
+  list, ambiguity, correction, fuzzy mark-paid, history, and cleanup.
+- A8 passed across revisions 00003 and 00004: the exact same portal token and
+  stable URL reloaded without reconfiguration and retained its Neon-backed
+  expense; the same public `/mcp` URL reinitialized without a header.
+- Stale/closed pooled-connection recovery is covered at the transaction layer
+  with first-statement retry and poisoned-connection eviction tests. Production
+  refuses SQLite fallback, and Cloud Run remains configured to scale to zero.
+- Final public smoke passed on revision 00004, temporary expenses were deleted,
+  temporary tokens were revoked, and the accepted revision had no ERROR logs.
+
+## Wave 6 — human onboarding
 
 Only after all prior gates pass:
 
@@ -260,10 +274,9 @@ Only after all prior gates pass:
    a reversible write. ChatGPT custom MCP availability and write permissions
    depend on workspace plan and admin settings, so treat ChatGPT as an
    additional client acceptance test rather than the only launch gate.
-5. Mark the release in the changelog, tag it, and archive this plan or change
-   its status to complete with the deployed revision, commit SHA, service URL,
-   Neon project ID, and test summaries. Never record the database URI or portal
-   token.
+5. The technical release record, changelog, and tag are complete. After the
+   household flow succeeds, change this plan's status from onboarding pending
+   to fully complete. Never record the database URI or portal token.
 
 ## Operations after launch
 

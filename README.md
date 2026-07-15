@@ -48,5 +48,5 @@ Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
 
 ## Status
 
-**v0.4.4** — production-hardened for first deploy (see `docs/CHANGELOG.md`).
-Developed on `claude/family-expenses-setup-8uvrks`.
+**v0.4.4** — deployed and technically accepted on Cloud Run + Neon (see
+`docs/CHANGELOG.md`). Default branch: `main`.

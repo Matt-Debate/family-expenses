@@ -111,8 +111,8 @@ available at `http://localhost:8080`.
 
 ## Deployment status
 
-As of 2026-07-15, version 0.4.4 is being prepared for first deployment. The
-one-time deployment checklist remains in `CLAUDE.md`; consult it before any
-deployment work. In particular, the Cloud Run service name and region become
+As of 2026-07-15, version 0.4.4 is deployed and technically accepted. The
+evidence record and remaining human onboarding steps are in
+`docs/FIRST_DEPLOY_PLAN.md`. The Cloud Run service name and region are now
 permanent compatibility constraints, production must remain unauthenticated,
 and live verification must exercise the real Postgres schema and public URL.
