@@ -34,6 +34,41 @@ _EXPENSE_COLS = (
 )
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# Canonical category list. `category` stays free text in the database (the MCP
+# can write anything), but these are what the portal offers and what analytics
+# group by. Grouped for the phone dropdown; the group labels are UI-only.
+# Mirrored in app/portal.html — CategoryParityTests fails if the two drift.
+CATEGORIES = (
+    ("living",        "生活费",       "Living"),
+    ("aden-edu",      "Aden 教育",    "Aden · education"),
+    ("aden-sports",   "Aden 运动",    "Aden · sports"),
+    ("aden-clothes",  "Aden 衣服",    "Aden · clothes"),
+    ("aden-other",    "Aden 其他",    "Aden · other"),
+    ("food",          "食品",         "Food"),
+    ("home",          "家居",         "Home"),
+    ("utilities",     "水电",         "Utilities"),
+    ("internet",      "网络",         "Internet"),
+    ("mobile",        "手机",         "Mobile"),
+    ("transport",     "交通",         "Transport"),
+    ("travel",        "旅行",         "Travel"),
+    ("entertainment", "娱乐",         "Entertainment"),
+    ("clothes",       "衣服",         "Clothes"),
+    ("medical",       "医疗",         "Medical"),
+    ("borrow",        "垫付",         "Borrowed / fronted"),
+    ("other",         "其他",         "Other"),
+)
+CATEGORY_KEYS = tuple(key for key, _zh, _en in CATEGORIES)
+
+# 'borrow' is the one category with arithmetic attached: she fronted the money,
+# so it is owed back to HER rather than being household spending. It is kept out
+# of every expense total and reported on its own — repaying her must not read as
+# the family having spent that money.
+BORROW_CATEGORY = "borrow"
+# category is nullable, and `category <> 'borrow'` is NULL (not true) for a NULL
+# category, which would silently drop uncategorised rows from every total.
+_NOT_BORROW = "COALESCE(category, '') <> 'borrow'"
+_IS_BORROW = "COALESCE(category, '') = 'borrow'"
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -292,15 +327,39 @@ class Store:
             )
         return [self._row_to_expense(row) for row in rows]
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self, *, today: Optional[str] = None) -> dict[str, Any]:
+        """Household totals, split the way the household actually thinks.
+
+        Two distinctions the raw paid/unpaid split cannot express:
+
+        * **due vs upcoming** — recurring costs (the monthly living payment) are
+          entered months ahead. A bare "unpaid" total would report a year of rent
+          as owed today, which is both wrong and alarming. ``due_now`` counts
+          only what has actually come due.
+        * **expense vs borrow** — see :data:`BORROW_CATEGORY`. Every expense
+          figure here excludes borrows; borrows are reported on their own.
+        """
+        today = today or today_str()
         with self.db.tx() as tx:
             row = tx.query_one(
                 "SELECT COUNT(*) AS count, "
                 "COALESCE(SUM(amount), 0) AS total, "
-                "COALESCE(SUM(amount) FILTER (WHERE paid), 0) AS paid, "
-                "COALESCE(SUM(amount) FILTER (WHERE NOT paid), 0) AS unpaid, "
-                "COUNT(*) FILTER (WHERE NOT paid) AS unpaid_count "
-                "FROM expenses"
+                f"COALESCE(SUM(amount) FILTER (WHERE paid AND {_NOT_BORROW}), 0) AS paid, "
+                f"COALESCE(SUM(amount) FILTER (WHERE NOT paid AND {_NOT_BORROW}), 0) AS unpaid, "
+                f"COUNT(*) FILTER (WHERE NOT paid AND {_NOT_BORROW}) AS unpaid_count, "
+                f"COALESCE(SUM(amount) FILTER (WHERE NOT paid AND {_NOT_BORROW} "
+                "  AND date <= :today), 0) AS due_now, "
+                f"COUNT(*) FILTER (WHERE NOT paid AND {_NOT_BORROW} "
+                "  AND date <= :today) AS due_now_count, "
+                f"COALESCE(SUM(amount) FILTER (WHERE NOT paid AND {_NOT_BORROW} "
+                "  AND date > :today), 0) AS upcoming, "
+                f"COUNT(*) FILTER (WHERE NOT paid AND {_NOT_BORROW} "
+                "  AND date > :today) AS upcoming_count, "
+                f"COALESCE(SUM(amount) FILTER (WHERE NOT paid AND {_IS_BORROW}), 0) AS borrow_owed, "
+                f"COUNT(*) FILTER (WHERE NOT paid AND {_IS_BORROW}) AS borrow_owed_count, "
+                f"COALESCE(SUM(amount) FILTER (WHERE paid AND {_IS_BORROW}), 0) AS borrow_repaid "
+                "FROM expenses",
+                {"today": today},
             )
         return {
             "count": int(row["count"]),
@@ -308,6 +367,13 @@ class Store:
             "paid": round(float(row["paid"]), 2),
             "unpaid": round(float(row["unpaid"]), 2),
             "unpaid_count": int(row["unpaid_count"]),
+            "due_now": round(float(row["due_now"]), 2),
+            "due_now_count": int(row["due_now_count"]),
+            "upcoming": round(float(row["upcoming"]), 2),
+            "upcoming_count": int(row["upcoming_count"]),
+            "borrow_owed": round(float(row["borrow_owed"]), 2),
+            "borrow_owed_count": int(row["borrow_owed_count"]),
+            "borrow_repaid": round(float(row["borrow_repaid"]), 2),
         }
 
     def history(self, expense_id: str) -> list[HistoryEntry]:

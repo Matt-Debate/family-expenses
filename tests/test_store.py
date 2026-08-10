@@ -53,11 +53,46 @@ class CreateAndReadTests(unittest.TestCase):
         a = self.store.create(date="2026-07-01", amount=10.25)
         self.store.create(date="2026-07-02", amount=5.75)
         self.store.mark_paid(a.id, paid=True, paid_date="2026-07-03")
-        s = self.store.summary()
+        s = self.store.summary(today="2026-07-31")
         self.assertEqual(s, {
             "count": 2, "total": 16.0, "paid": 10.25,
             "unpaid": 5.75, "unpaid_count": 1,
+            "due_now": 5.75, "due_now_count": 1,
+            "upcoming": 0.0, "upcoming_count": 0,
+            "borrow_owed": 0.0, "borrow_owed_count": 0, "borrow_repaid": 0.0,
         })
+
+    def test_summary_splits_due_from_upcoming(self):
+        """Recurring costs are entered months ahead; a bare unpaid total would
+        report a year of rent as owed today."""
+        self.store.create(date="2026-07-02", amount=245, category="utilities")
+        self.store.create(date="2026-09-01", amount=22000, category="living")
+        s = self.store.summary(today="2026-07-31")
+        self.assertEqual(s["due_now"], 245.0)
+        self.assertEqual(s["upcoming"], 22000.0)
+        self.assertEqual(s["unpaid"], 22245.0)  # both, for anything wanting the whole
+
+    def test_summary_keeps_borrow_out_of_every_expense_figure(self):
+        """She fronted the money — repaying her is not household spending."""
+        self.store.create(date="2026-07-02", amount=800, category="borrow")
+        repaid = self.store.create(date="2026-07-01", amount=500, category="borrow")
+        self.store.mark_paid(repaid.id, paid=True, paid_date="2026-07-05")
+        spent = self.store.create(date="2026-07-01", amount=300, category="aden-sports")
+        self.store.mark_paid(spent.id, paid=True, paid_date="2026-07-01")
+        s = self.store.summary(today="2026-07-31")
+        self.assertEqual(s["paid"], 300.0)      # NOT 800
+        self.assertEqual(s["unpaid"], 0.0)      # the outstanding borrow is not an expense
+        self.assertEqual(s["due_now"], 0.0)
+        self.assertEqual(s["borrow_owed"], 800.0)
+        self.assertEqual(s["borrow_repaid"], 500.0)
+
+    def test_summary_counts_uncategorised_rows(self):
+        """`category <> 'borrow'` is NULL for a NULL category — a naive filter
+        would silently drop every uncategorised expense from the totals."""
+        self.store.create(date="2026-07-02", amount=42)  # no category at all
+        s = self.store.summary(today="2026-07-31")
+        self.assertEqual(s["unpaid"], 42.0)
+        self.assertEqual(s["due_now"], 42.0)
 
 
 class ValidationTests(unittest.TestCase):
