@@ -14,6 +14,43 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: health + portal routes OK.
 
+## [0.4.5] — 2026-08-10
+
+### Fixed
+- **Stored XSS in the portal (security).** `render()` interpolated the category
+  label into `innerHTML` unescaped whenever the category was not one of the six
+  known keys (`app/portal.html`, the `esc(e.description) || catLabel` fallback);
+  the same value was already escaped two lines later, which is what made it a
+  slip rather than a decision. `category` is unvalidated end to end — the API
+  takes `body.get("category")` raw and the column is bare `TEXT` — so any writer
+  could plant markup, and with `/mcp` unauthenticated that means any caller who
+  knows the URL. A rendered payload can read `location.pathname` and exfiltrate
+  the never-expiring portal token. Now escaped at the render sink; stored values
+  are deliberately left verbatim so the ledger and MCP round-trips stay honest.
+- An expense with neither description nor category rendered as `[object Object]`
+  — the fallback called `t("cat")`, which returns the category *map*, not a
+  string. Now renders `–`.
+- `data-id` is escaped defensively; ids are server-generated hex, so this is
+  depth, not a live hole.
+
+### Changed
+- Added `.gitignore` and untracked the 12 committed `__pycache__/*.pyc` files.
+  Their churn made `git status --porcelain` permanently non-empty, which tripped
+  the clean-tree guard in `scripts/deploy.sh` and blocked every deploy after a
+  test run. Also ignores `*.db` and `.env`.
+
+### Tests
+- `PortalEscapingTests` pins the fix by accounting for every `catLabel` occurrence
+  in `render()` — each must be `var catLabel`, `esc(catLabel)`, or a bare
+  truthiness guard; anything left over fails with the offending line number. A
+  `+ catLabel` adjacency check would NOT have caught the original bug (the raw use
+  sat between `||` operators), and asserting `esc(catLabel)` is present would not
+  either (it already appeared elsewhere in `render()` while the hole was open).
+  Verified in both directions against the vulnerable line before committing.
+- A second test pins that writes are *not* sanitized: escaping belongs at the
+  render sink, and mangling stored categories would corrupt MCP round-trips.
+- Suite 75 → **77**.
+
 ## [0.4.4] — 2026-07-15
 
 ### Operations and verification

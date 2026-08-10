@@ -30,7 +30,7 @@ annotations. Server `instructions` is bonus, never the only home of a rule.
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 75 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 77 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link
 DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post-deploy
@@ -57,9 +57,15 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 - Timestamps are app-managed UTC ISO text; "today" defaults use `APP_TZ`.
 - Development branch: `claude/family-expenses-setup-8uvrks`.
 
-## Current state (2026-07-15)
+## Current state (2026-08-10)
 
-v0.4.4 is deployed and technically accepted. The permanent service is
+**v0.4.5 is committed but NOT deployed.** It fixes a stored XSS in the portal
+(unescaped category label reaching `innerHTML`) that, combined with the
+unauthenticated `/mcp`, let any caller who knows the URL plant markup that
+exfiltrates her portal token. Deploy it before minting or sending the real
+`wife` link. The suite is 77 tests.
+
+v0.4.4 is what is live and technically accepted. The permanent service is
 `family-expenses` in `asia-southeast1`, backed by the separate Singapore Neon
 project. The public portal and MCP acceptance gates pass at
 `https://family-expenses-bejtu5m47a-as.a.run.app`; see

@@ -204,8 +204,8 @@
     var shown = expenses;
     list.innerHTML = shown.map(function (e) {
       var catLabel = e.category && STR[lang].cat[e.category] ? STR[lang].cat[e.category] : (e.category || "");
-      return '<div class="item" data-id="' + e.id + '">' +
-        '<div class="top"><span class="desc">' + (esc(e.description) || catLabel || t("cat")) + "</span>" +
+      return '<div class="item" data-id="' + esc(e.id) + '">' +
+        '<div class="top"><span class="desc">' + (esc(e.description) || esc(catLabel) || "–") + "</span>" +
         '<span class="amt">' + money(e.amount) + "</span></div>" +
         '<div class="meta">' +
           '<span class="badge ' + (e.paid ? "paid" : "unpaid") + '">' + t(e.paid ? "badge_paid" : "badge_unpaid") +

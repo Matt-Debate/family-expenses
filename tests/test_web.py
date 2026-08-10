@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -128,6 +129,60 @@ class ApiFlowTests(unittest.TestCase):
         ):
             r = self.post(name, id="missing", **extra)
             self.assertEqual(r.status_code, 404, name)
+
+
+class PortalEscapingTests(unittest.TestCase):
+    """Regression guard for the stored-XSS fix in 0.4.5.
+
+    render() builds list rows with innerHTML, so every server-supplied value has to
+    pass through esc(). `category` is deliberately free-form end-to-end (MCP callers
+    pass arbitrary strings and the ledger stores them verbatim), which makes the
+    render-time escape the only control standing between a planted category and a
+    stolen portal token.
+    """
+
+    PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+
+    def setUp(self):
+        self.html = self.PORTAL.read_text(encoding="utf-8")
+
+    def test_every_use_of_catlabel_is_escaped_or_a_truthiness_guard(self):
+        """Account for every `catLabel` occurrence; anything left over is a raw use.
+
+        Deliberately not a `+ catLabel` adjacency check: the original bug read
+        `esc(e.description) || catLabel || t("cat")`, where the raw use sits between
+        `||` operators and no such pattern matches. Nor is `assertIn("esc(catLabel)")`
+        sufficient — the escaped call already existed elsewhere in render() while the
+        hole was open. Subtracting the known-safe forms is what actually discriminates.
+        """
+        offenders = []
+        for lineno, line in enumerate(self.html.splitlines(), 1):
+            if "catLabel" not in line:
+                continue
+            residue = line.replace("var catLabel", "")
+            residue = residue.replace("esc(catLabel)", "")
+            residue = re.sub(r"catLabel\s*\?", "", residue)  # truthiness guard only
+            if "catLabel" in residue:
+                offenders.append(f"  app/portal.html:{lineno}: {line.strip()}")
+        self.assertEqual(
+            offenders, [],
+            "catLabel reaches innerHTML unescaped — wrap it in esc():\n"
+            + "\n".join(offenders),
+        )
+
+    def test_category_is_stored_verbatim_not_sanitized_on_write(self):
+        """Escaping belongs at render, not on write.
+
+        Mangling stored categories would corrupt the ledger and break MCP round-trips,
+        so the API must keep the raw bytes and the portal must escape them.
+        """
+        client, _store, token = make_client()
+        payload = "<img src=x onerror=alert(1)>"
+        r = client.post("/api/submit", json={
+            "token": token, "date": "2026-07-14", "amount": 5, "category": payload,
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["expense"]["category"], payload)
 
 
 if __name__ == "__main__":

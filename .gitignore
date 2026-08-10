@@ -1,0 +1,10 @@
+# Python bytecode — never commit; scripts/deploy.sh refuses a dirty tree,
+# so tracked .pyc files would block every deploy after a test run.
+__pycache__/
+*.py[cod]
+
+# Local sqlite database used when DATABASE_URL is unset (app/db.py fallback)
+*.db
+
+# Local environment — never commit; DATABASE_URL comes from Secret Manager in production
+.env
