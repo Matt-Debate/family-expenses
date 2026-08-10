@@ -38,6 +38,17 @@ run() {
   fi
 }
 
+# Portal OAuth (Auth0 Universal Login). MCP_SECRET is still never set — /mcp
+# stays open and header-free; this gates the PORTAL only. Clear
+# PORTAL_ALLOWED_EMAILS to lock everyone out, or drop the AUTH0_* vars entirely
+# to turn login off and return to the pre-0.5.0 behavior.
+AUTH0_DOMAIN="${AUTH0_DOMAIN:-work-os.jp.auth0.com}"
+AUTH0_CLIENT_ID="${AUTH0_CLIENT_ID:-EA00YyDGHHz7ATEguoAIWmSq6xD8iOES}"
+AUTH0_SECRET="${AUTH0_SECRET:-family-expenses-auth0-client-secret}"
+SESSION_SECRET_NAME="${SESSION_SECRET_NAME:-family-expenses-session-secret}"
+PORTAL_ALLOWED_EMAILS="${PORTAL_ALLOWED_EMAILS:-matthewfarm@gmail.com}"
+PORTAL_BASE_URL="${PORTAL_BASE_URL:-https://family-expenses-bejtu5m47a-as.a.run.app}"
+
 run gcloud builds submit . \
   --config=cloudbuild.yaml \
   --project="$PROJECT" \
@@ -51,8 +62,8 @@ run gcloud run deploy "$SERVICE" \
   --allow-unauthenticated \
   --min-instances=0 \
   --max-instances=3 \
-  --set-env-vars="HOST=0.0.0.0,APP_TZ=Asia/Shanghai" \
-  --set-secrets="DATABASE_URL=${SECRET}:latest" \
+  --set-env-vars="HOST=0.0.0.0,APP_TZ=Asia/Shanghai,AUTH0_DOMAIN=${AUTH0_DOMAIN},AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID},PORTAL_ALLOWED_EMAILS=${PORTAL_ALLOWED_EMAILS},PORTAL_BASE_URL=${PORTAL_BASE_URL}" \
+  --set-secrets="DATABASE_URL=${SECRET}:latest,AUTH0_CLIENT_SECRET=${AUTH0_SECRET}:latest,SESSION_SECRET=${SESSION_SECRET_NAME}:latest" \
   --quiet
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
