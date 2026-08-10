@@ -1,168 +1,205 @@
-<!doctype html>
-<html lang="zh">
-<head>
+<!DOCTYPE html>
+<html lang="zh"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>家庭开支 · Family Expenses</title>
+
 <style>
+  /* 账本 — the page IS the paper. No cards, no boxes: a typographic ledger.
+     Ink on warm paper, one cinnabar seal-red accent (buttons, active tab, due),
+     green stamp for paid, blue ink for money owed back. Rows are hairline-ruled
+     full-bleed lines; the summary is a single hero figure, not a card grid.
+     Chinese-first: medium weights, 1.6 line-height, tabular numerals.
+     html tracks iOS Dynamic Type (large-text setting scales everything). */
   :root {
-    --bg:#f5f6f8; --card:#ffffff; --text:#15181c; --muted:#6b7280;
-    --line:#e4e7eb; --accent:#2563eb; --accent-soft:#e8f0fe;
-    --danger:#dc2626; --ok:#15803d;
-    --due:#b45309; --due-soft:#fef3c7;
-    --lend:#7c3aed; --lend-soft:#f3e8ff;
-    --radius:14px;
+    --bg:#f6f2e9; --card:#f6f2e9; --text:#211d15; --muted:#7a7160;
+    --line:#e3dcc9; --rule:#c9c0a8;
+    --accent:#b5402c; --accent-soft:#f3e2da;
+    --danger:#b5402c; --ok:#3f7d54;
+    --due:#b5402c; --due-soft:#f3e2da;
+    --lend:#46589a; --lend-soft:#e7ebf5;
+    --radius:8px;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#0e1013; --card:#171a1f; --text:#e8eaed; --muted:#9aa2ad;
-      --line:#282d35; --accent:#4b8bf5; --accent-soft:#16273f;
-      --ok:#4ade80; --due:#fbbf24; --due-soft:#3a2c08;
-      --lend:#c4a5fb; --lend-soft:#2a1f3d; }
+    /* night ink: warm near-black paper, brightened seal red, softened inks */
+    :root { --bg:#131110; --card:#131110; --text:#eae4d3; --muted:#9c937e;
+      --line:#2c2920; --rule:#48422f;
+      --accent:#e57a5f; --accent-soft:#3a1e16;
+      --danger:#e57a5f; --ok:#6cc08b;
+      --due:#e57a5f; --due-soft:#3a1e16;
+      --lend:#94a7e0; --lend-soft:#232a40; }
   }
   * { box-sizing:border-box; }
-  html { -webkit-text-size-adjust:100%; }
-  body { margin:0; background:var(--bg); color:var(--text); line-height:1.5;
+  html { font:-apple-system-body; -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); line-height:1.6;
     font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,sans-serif;
-    font-size:16px; }
+    font-size:1em; }
+  a { color:var(--accent); }
 
-  header { position:sticky; top:0; z-index:20; background:var(--card);
-    border-bottom:1px solid var(--line); padding:10px 14px;
-    padding-top:calc(10px + env(safe-area-inset-top));
+  header { position:sticky; top:0; z-index:20; background:var(--bg);
+    padding:12px 16px 8px; padding-top:calc(12px + env(safe-area-inset-top));
     display:flex; justify-content:space-between; align-items:center; gap:10px; }
-  header h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.01em; }
-  .wrap { max-width:560px; margin:0 auto; padding:12px 12px 40px; }
+  header h1 { font-size:.92rem; margin:0; font-weight:500; letter-spacing:.18em;
+    color:var(--muted); display:flex; align-items:center; gap:8px; }
+  header h1::before { content:""; width:9px; height:9px; background:var(--accent);
+    border-radius:2px; flex:0 0 auto; }
+  .wrap { max-width:560px; margin:0 auto;
+    padding:4px 16px calc(88px + env(safe-area-inset-bottom)); }
 
-  /* ---- summary cards ---- */
-  .cards { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
-    padding:10px 12px; min-width:0; }
-  .card.wide { grid-column:1 / -1; }
-  .card .k { font-size:.72rem; color:var(--muted); font-weight:600;
-    display:flex; align-items:center; gap:5px; }
-  .card .v { font-size:1.3rem; font-weight:700; margin-top:1px;
-    overflow-wrap:anywhere; line-height:1.2; }
-  .card .n { font-size:.7rem; color:var(--muted); }
+  /* ---- summary: one hero figure, the rest a ruled tally ---- */
+  .cards { display:block; margin:2px 0 6px; }
+  .card { background:none; border:0; border-radius:0; padding:0; min-width:0; }
+  .card.due { padding:6px 0 14px; }
+  .card.due .k { font-size:.78rem; }
+  .card.due .v { font-size:2.9rem; font-weight:350; letter-spacing:-.02em;
+    line-height:1.15; margin-top:2px; }
+  .card .k { font-size:.75rem; color:var(--muted); font-weight:600;
+    letter-spacing:.1em; display:flex; align-items:center; gap:7px; }
+  .card .v { font-size:1rem; font-weight:600; overflow-wrap:anywhere;
+    line-height:1.3; font-variant-numeric:tabular-nums; }
+  .card .n { font-size:.72rem; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .card:not(.due) { display:flex; align-items:baseline; gap:8px;
+    border-top:1px solid var(--line); padding:9px 0; }
+  .card:not(.due) .k { flex:1 1 auto; }
+  .card:not(.due) .n { display:none; }
   .card.due .v { color:var(--due); }
   .card.lend .v { color:var(--lend); }
-  .dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
+  .dot { width:6px; height:6px; border-radius:50%; flex:0 0 auto; }
   .dot.due { background:var(--due); } .dot.lend { background:var(--lend); }
   .dot.ok { background:var(--ok); } .dot.soon { background:var(--muted); }
 
-  /* ---- tabs ---- */
-  .tabs { display:flex; gap:4px; background:var(--card); border:1px solid var(--line);
-    border-radius:999px; padding:4px; margin-bottom:12px; }
-  .tab { flex:1; text-align:center; padding:8px 4px; border-radius:999px;
-    font-size:.85rem; font-weight:600; cursor:pointer; border:0;
-    background:transparent; color:var(--muted); min-width:0; }
-  .tab.on { background:var(--accent); color:#fff; }
+  /* ---- tabs: bottom dock; active tab is a cinnabar seal ---- */
+  .tabs { position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex; gap:6px;
+    background:var(--bg); border-top:1px solid var(--line);
+    padding:8px 16px calc(8px + env(safe-area-inset-bottom)); }
+  .tab { flex:1; text-align:center; padding:10px 4px; border-radius:var(--radius);
+    font-size:.94rem; font-weight:600; letter-spacing:.14em; cursor:pointer; border:0;
+    background:transparent; color:var(--muted); min-width:0;
+    transition:background .15s, color .15s; }
+  .tab.on { background:var(--accent); color:var(--bg); }
 
-  /* ---- forms ---- */
-  label { display:block; font-size:.74rem; color:var(--muted); margin:9px 0 3px; font-weight:600; }
+  /* ---- forms: underlined fields on the paper, no boxes ---- */
+  label { display:block; font-size:.75rem; color:var(--muted); margin:12px 0 0;
+    font-weight:600; letter-spacing:.08em; }
   input, select, button, textarea { font:inherit; width:100%; color:var(--text);
-    background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
-  input:focus, select:focus { outline:2px solid var(--accent); border-color:var(--accent); }
-  .row { display:flex; gap:10px; } .row > * { flex:1 1 0; min-width:0; }
-  button.primary { background:var(--accent); border-color:var(--accent); color:#fff;
-    font-weight:700; margin-top:12px; cursor:pointer; font-size:1rem; padding:12px; }
-  .panel { background:var(--card); border:1px solid var(--line);
-    border-radius:var(--radius); padding:12px 14px; margin-bottom:12px; }
-  details.add summary { cursor:pointer; font-weight:650; font-size:.92rem;
-    list-style:none; display:flex; align-items:center; gap:8px; }
+    background:transparent; border:0; border-bottom:1px solid var(--rule);
+    border-radius:0; padding:8px 2px; }
+  input:focus, select:focus { outline:none; border-bottom:1.5px solid var(--accent); }
+  select { -webkit-appearance:none; appearance:none;
+    background-image:linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:calc(100% - 12px) 55%, calc(100% - 7px) 55%;
+    background-size:5px 5px; background-repeat:no-repeat; }
+  input[type="date"] { min-height:44px; }
+  .row { display:flex; gap:16px; } .row > * { flex:1 1 0; min-width:0; }
+  button.primary { background:var(--accent); border:0; color:var(--bg);
+    font-weight:600; letter-spacing:.2em; margin-top:18px; cursor:pointer;
+    font-size:.98rem; padding:13px; border-radius:var(--radius); }
+  .panel { background:none; border:0; border-radius:0; padding:0; margin-bottom:12px; }
+  details.add { border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+    padding:2px 0; margin:4px 0 2px; }
+  details.add summary { cursor:pointer; font-weight:600; font-size:.9rem;
+    letter-spacing:.06em; color:var(--accent); list-style:none;
+    display:flex; align-items:center; gap:8px; padding:10px 2px; }
   details.add summary::-webkit-details-marker { display:none; }
-  details.add summary::before { content:"＋"; color:var(--accent); font-weight:800; }
+  details.add summary::before { content:"＋"; font-weight:600; }
   details.add[open] summary::before { content:"−"; }
+  details.add form { padding:0 2px 16px; }
 
-  /* ---- section headings ---- */
+  /* ---- section headings: ruled like an account book ---- */
   .sec { display:flex; align-items:baseline; justify-content:space-between;
-    gap:8px; margin:16px 2px 8px; }
-  .sec h2 { font-size:.8rem; margin:0; color:var(--muted);
-    text-transform:uppercase; letter-spacing:.06em; font-weight:700; }
+    gap:8px; margin:26px 0 0; padding-bottom:6px; border-bottom:1px solid var(--rule); }
+  .sec h2 { font-size:.78rem; margin:0; color:var(--text);
+    text-transform:uppercase; letter-spacing:.16em; font-weight:600; }
   .sec .tot { font-size:.8rem; color:var(--muted); font-variant-numeric:tabular-nums; }
 
-  /* ---- expense list ----
-     A dense list, not cards: this screen is read far more often than it is
-     touched, so every row of chrome costs a row of ledger. Two lines per item,
-     hairline separators, actions revealed on tap. The old .meta flex row let
-     the due date and category collide under ~400px; the sub-line is a single
-     wrapping text run now, so there is nothing left to overlap. */
-  .list { background:var(--card); border:1px solid var(--line);
-    border-radius:var(--radius); overflow:hidden; }
-  .item + .item { border-top:1px solid var(--line); }
-  .item.open { background:var(--accent-soft); }
-  .ex-hd { display:flex; gap:10px; align-items:baseline; padding:9px 12px; cursor:pointer; }
+  /* ---- expense list: bare ruled lines, no container ---- */
+  .list { background:none; border:0; border-radius:0; overflow:visible; }
+  .item + .item, details.add + * .item:first-child { border-top:1px solid var(--line); }
+  .item { border-top:1px solid var(--line); }
+  .list .item:first-child { border-top:0; }
+  .item.open { background:var(--accent-soft); border-radius:var(--radius);
+    border-top-color:transparent; margin:0 -8px; padding:0 8px; }
+  .item.open + .item { border-top-color:transparent; }
+  .ex-hd { display:flex; gap:12px; align-items:baseline; padding:10px 0; cursor:pointer; }
+  .item.open .ex-hd { padding:10px 0 6px; }
   .ex-txt { flex:1 1 auto; min-width:0; }
-  .ex-desc { font-weight:600; overflow-wrap:anywhere; line-height:1.35; }
-  .ex-sub { font-size:.75rem; color:var(--muted); margin-top:1px; overflow-wrap:anywhere; }
-  .ex-amt { flex:0 0 auto; white-space:nowrap; font-weight:650;
+  .ex-desc { font-weight:550; overflow-wrap:anywhere; line-height:1.45; }
+  .ex-sub { font-size:.76rem; color:var(--muted); margin-top:1px;
+    overflow-wrap:anywhere; line-height:1.5; }
+  .ex-amt { flex:0 0 auto; white-space:nowrap; font-weight:600;
     font-variant-numeric:tabular-nums; }
-  .st { font-weight:650; }
+  .st { font-weight:600; }
   .st.due  { color:var(--due); }
   .st.paid { color:var(--ok); }
   .st.soon { color:var(--muted); }
   .st.lend { color:var(--lend); }
-  .item.paid .ex-desc, .item.paid .ex-amt { color:var(--muted); font-weight:550; }
-  .btns { display:flex; gap:6px; padding:0 12px 10px; }
-  .btns button { padding:7px 4px; font-size:.78rem; cursor:pointer; border-radius:9px; }
-  .btns .pay { color:var(--ok); border-color:var(--ok); font-weight:650; }
+  .item.paid .ex-desc, .item.paid .ex-amt { color:var(--muted); font-weight:450; }
+  .btns { display:flex; gap:8px; padding:2px 0 12px; }
+  .btns button { padding:9px 4px; font-size:.8rem; cursor:pointer;
+    border:1px solid var(--rule); border-radius:var(--radius); background:transparent; }
+  .btns .pay { color:var(--ok); border-color:var(--ok); font-weight:600; }
   .btns .del { color:var(--danger); }
-  .editbox, .histbox { padding:0 12px 10px; }
+  .editbox, .histbox { padding:0 0 14px; }
   .hist { font-size:.75rem; color:var(--muted); margin:3px 0; overflow-wrap:anywhere; }
-  .empty { text-align:center; color:var(--muted); padding:20px 8px; font-size:.88rem; }
+  .empty { text-align:center; color:var(--muted); padding:22px 8px 10px; font-size:.88rem; }
 
-  /* ---- history (statement) table ---- */
-  .stmt { width:100%; border-collapse:collapse; font-size:.86rem; }
-  .stmt th { text-align:right; font-size:.68rem; color:var(--muted); font-weight:700;
-    text-transform:uppercase; letter-spacing:.05em; padding:0 0 7px; }
+  /* ---- history: a bare statement ---- */
+  .stmt { width:100%; border-collapse:collapse; font-size:.88rem; margin-top:8px; }
+  .stmt th { text-align:right; font-size:.68rem; color:var(--muted); font-weight:600;
+    text-transform:uppercase; letter-spacing:.1em; padding:0 0 7px;
+    border-bottom:1px solid var(--rule); }
   .stmt th:first-child { text-align:left; }
-  .stmt td { padding:9px 0; border-top:1px solid var(--line); text-align:right;
+  .stmt td { padding:10px 0; border-top:1px solid var(--line); text-align:right;
     font-variant-numeric:tabular-nums; }
-  .stmt td:first-child { text-align:left; font-weight:650; }
+  .stmt tbody tr:first-child td { border-top:0; }
+  .stmt td:first-child { text-align:left; font-weight:600; }
   .stmt td.n { color:var(--muted); font-size:.8rem; }
-  .stmt td.out { color:var(--due); font-weight:650; }
-  .stmt td.zero { color:var(--line); }
+  .stmt td.out { color:var(--due); font-weight:600; }
+  .stmt td.zero { color:var(--rule); }
   .stmt tr.mrow { cursor:pointer; }
   .stmt tr.mrow:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
   .caret { display:inline-block; width:1em; color:var(--muted);
     transition:transform .15s; transform:translateY(-1px); }
   .stmt tr.mrow.open .caret { transform:rotate(90deg); }
-  /* the expanded month: full-bleed inside the cell, no table padding fighting it */
-  .stmt tr.drow > td { padding:0 0 10px; border-top:0; }
-  .detail .list { border-radius:10px; }
+  .stmt tr.drow > td { padding:0 0 6px 12px; border-top:0; }
+  .detail .list { border-left:2px solid var(--accent-soft); padding-left:10px; }
 
-  /* ---- stats ----
-     Chart marks are ONE hue in both modes. The theme's amber and violet are
-     tuned as text on a dark surface and fail the mark lightness band there, so
-     identity is carried by labels, not by hue. Both charts compare magnitude,
-     which wants sequential anyway. */
-  .viz { --mark:#2563eb; --grid:#e4e7eb; --axis:#c3c2b7; }
-  @media (prefers-color-scheme: dark) { .viz { --mark:#4b8bf5; --grid:#282d35; --axis:#383835; } }
-  .kpi { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
-  .kpi .t { background:var(--card); border:1px solid var(--line);
-    border-radius:var(--radius); padding:10px 12px; min-width:0; }
-  .kpi .t .k { font-size:.7rem; color:var(--muted); font-weight:600; }
-  /* proportional figures, not tabular — equal-width digits read loose at this size */
-  .kpi .t .v { font-size:1.15rem; font-weight:700; margin-top:1px; overflow-wrap:anywhere; }
+  /* ---- stats: bare charts on the paper; marks ONE hue (cinnabar) ---- */
+  .viz { --mark:#c04a34; --grid:#e3dcc9; --axis:#c9c0a8; }
+  @media (prefers-color-scheme: dark) { .viz { --mark:#d97258; --grid:#2c2920; --axis:#48422f; } }
+  .kpi { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; margin-bottom:16px; }
+  .kpi .t { background:none; border:0; border-radius:0; border-top:1px solid var(--line);
+    padding:9px 0 8px; min-width:0; }
+  .kpi .t .k { font-size:.72rem; color:var(--muted); font-weight:600; letter-spacing:.08em; }
+  .kpi .t .v { font-size:1.25rem; font-weight:600; margin-top:1px; overflow-wrap:anywhere;
+    font-variant-numeric:tabular-nums; }
   .kpi .t .s { font-size:.68rem; color:var(--muted); }
-  .chart { background:var(--card); border:1px solid var(--line);
-    border-radius:var(--radius); padding:12px 12px 10px; margin-bottom:12px; }
-  .chart h3 { font-size:.78rem; margin:0 0 2px; font-weight:700;
-    text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
-  .chart .cap { font-size:.7rem; color:var(--muted); margin-bottom:10px; }
+  .chart { background:none; border:0; border-radius:0; padding:0; margin-bottom:22px; }
+  .chart h3 { font-size:.78rem; margin:0 0 1px; font-weight:600;
+    text-transform:uppercase; letter-spacing:.14em; color:var(--text);
+    padding-bottom:6px; border-bottom:1px solid var(--rule); }
+  .chart .cap { font-size:.7rem; color:var(--muted); margin:5px 0 12px; }
   .chart svg { width:100%; height:auto; display:block; overflow:visible; }
   .chart text { fill:var(--muted); font-size:9.5px;
     font-family:inherit; font-variant-numeric:tabular-nums; }
-  .chart text.val { fill:var(--text); font-weight:700; }
+  .chart text.val { fill:var(--text); font-weight:650; }
   .chart text.name { fill:var(--text); font-size:10px; }
   .chart .bar { fill:var(--mark); }
   .chart .grid { stroke:var(--grid); stroke-width:1; }
   .chart .base { stroke:var(--axis); stroke-width:1; }
+  .viz .sec { margin-top:10px; border-bottom:0; padding-bottom:0; }
+  .viz .sec h2 { color:var(--muted); }
 
-  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:22px; z-index:40;
-    background:var(--text); color:var(--bg); border-radius:10px; padding:10px 18px;
-    font-size:.9rem; opacity:0; transition:opacity .2s; pointer-events:none; }
+  .toast { position:fixed; left:50%; transform:translateX(-50%); z-index:40;
+    bottom:calc(80px + env(safe-area-inset-bottom));
+    background:var(--text); color:var(--bg); border-radius:var(--radius);
+    padding:10px 18px; font-size:.9rem; opacity:0; transition:opacity .2s;
+    pointer-events:none; }
   .toast.show { opacity:.96; }
-  .lang { width:auto; padding:6px 12px; border-radius:999px; cursor:pointer;
-    font-size:.8rem; flex:0 0 auto; }
+  .lang { width:auto; padding:5px 2px; border:0; cursor:pointer;
+    font-size:.8rem; flex:0 0 auto; background:transparent;
+    color:var(--accent); font-weight:600; letter-spacing:.1em; min-height:44px; }
 </style>
 </head>
 <body>
@@ -172,12 +209,6 @@
 </header>
 
 <div class="wrap">
-  <div class="tabs" id="tabs">
-    <button class="tab on" data-tab="now"></button>
-    <button class="tab" data-tab="history"></button>
-    <button class="tab" data-tab="stats"></button>
-  </div>
-
   <section id="pane-now">
     <div class="cards" id="cards"></div>
     <details class="add" id="addWrap">
@@ -186,11 +217,11 @@
         <div class="row">
           <div>
             <label for="amount" data-i18n="amount"></label>
-            <input id="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required placeholder="0.00">
+            <input id="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required="" placeholder="0.00">
           </div>
           <div>
             <label for="date" data-i18n="due"></label>
-            <input id="date" type="date" required>
+            <input id="date" type="date" required="">
           </div>
         </div>
         <label for="desc" data-i18n="desc"></label>
@@ -203,9 +234,14 @@
     <div id="nowBody"></div>
   </section>
 
-  <section id="pane-history" hidden><div class="panel" id="historyBody"></div></section>
-  <section id="pane-stats" hidden><div id="statsBody"></div></section>
+  <section id="pane-history" hidden=""><div class="panel" id="historyBody"></div></section>
+  <section id="pane-stats" hidden=""><div id="statsBody"></div></section>
 </div>
+<nav class="tabs" id="tabs">
+  <button class="tab on" data-tab="now"></button>
+  <button class="tab" data-tab="history"></button>
+  <button class="tab" data-tab="stats"></button>
+</nav>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -255,15 +291,15 @@
       empty_due:"Nothing due", empty_paid:"No payments yet this month", empty_all:"Nothing yet",
       mark_paid:"✓ Mark paid", unmark:"Unmark paid", edit:"Edit", del:"Delete", hist:"History",
       save:"Save", cancel:"Cancel", paid_on:"Paid on", confirm_del:"Delete this entry?",
-      st_due:"due", st_soon:"upcoming", st_paid:"paid", st_lent:"I paid",
+      st_due:"due", st_soon:"upcoming", st_paid:"paid", st_lent:"I lent",
       overdue_by:"overdue", days:"d", today:"today", tomorrow:"tomorrow",
       month:"Month", txns:"Txns", spent:"Paid", outstanding:"Outstanding",
-      sec_borrow:"What I paid for", kpi_fronted:"I fronted", kpi_repaid:"Repaid to me",
+      sec_borrow:"Money I lent", kpi_fronted:"I lent", kpi_repaid:"Repaid to me",
       kpi_wait:"Avg to repay", kpi_items:" items", kpi_oldest:"oldest",
-      kpi_settled:"all settled", ch_borrow:"Fronted by month", ch_borrow_cap:"Last 12 months",
+      kpi_settled:"all settled", ch_borrow:"Lent by month", ch_borrow_cap:"Last 12 months",
       kpi_avg:"Matt · monthly avg", kpi_mo:" mo", kpi_this:"Matt · this month",
       kpi_living:"Living", kpi_aden:"Aden total", kpi_12mo:"last 12 months",
-      ch_monthly:"Matt's payments by month", ch_monthly_cap:"Last 12 months · paid by Matt, excludes what I fronted",
+      ch_monthly:"Matt's payments by month", ch_monthly_cap:"Last 12 months · paid by Matt, excludes what I lent",
       ch_cat:"By category", ch_cat_cap:"Last 12 months · paid by Matt",
       added:"Added", saved:"Saved", deleted:"Deleted", marked:"Marked paid",
       unmarked:"Back to unpaid", err:"Something went wrong", link_err:"This link is invalid or expired",
@@ -271,7 +307,7 @@
         "aden-clothes":"Aden · clothes","aden-other":"Aden · other", food:"Food", home:"Home",
         utilities:"Utilities", internet:"Internet", mobile:"Mobile", transport:"Transport",
         travel:"Travel", entertainment:"Entertainment", clothes:"Clothes", medical:"Medical",
-        borrow:"I paid (owed back)", other:"Other" },
+        borrow:"I lent (owed back)", other:"Other" },
       act:{ create:"created", update:"edited", mark_paid:"marked paid", unmark_paid:"unmarked", "delete":"deleted" } },
   };
 
@@ -287,6 +323,14 @@
   function money(n) { return "¥" + Number(n || 0).toLocaleString(undefined,
     {minimumFractionDigits:2, maximumFractionDigits:2}); }
   function money0(n) { return "¥" + Math.round(Number(n || 0)).toLocaleString(); }
+  // chart-only: keeps 12 monthly labels from bleeding into each other.
+  // Exact amounts stay available in the History tab.
+  function moneyK(n) {
+    n = Math.round(Number(n || 0));
+    if (Math.abs(n) >= 10000) return "¥" + Math.round(n / 1000) + "k";
+    if (Math.abs(n) >= 1000) return "¥" + (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+    return "¥" + n.toLocaleString();
+  }
   function todayStr() {
     var d = new Date();
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
@@ -306,6 +350,7 @@
   }
   function api(name, body) {
     body = body || {}; body.token = TOKEN;
+    if (!TOKEN) return demoApi(name, body);
     return fetch("/api/" + name, {
       method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)
     }).then(function (r) { return r.json().then(function (j) {
@@ -573,7 +618,7 @@
       var x = i * (bw + gap), y = H - padB - h;
       var label = (i === top || s.now) && s.value > 0
         ? '<text class="val" x="' + (x + bw / 2) + '" y="' + (y - 4) +
-          '" text-anchor="middle">' + esc(money0(s.value)) + "</text>"
+          '" text-anchor="middle">' + esc(moneyK(s.value)) + "</text>"
         : "";
       // 4px rounded data-end, anchored to the baseline
       return '<rect class="bar" x="' + x + '" y="' + y + '" width="' + bw +
@@ -829,11 +874,72 @@
     }
   });
 
+  // ---- demo data (no token in URL: design preview only; real links always have /t/<token>) ----
+  var DEMO_EXP = null;
+  function demoInit() {
+    if (DEMO_EXP) return;
+    var now = new Date(), Y = now.getFullYear(), M = now.getMonth(), D = now.getDate(), id = 0;
+    function iso(y, m, d) { var dt = new Date(y, m, d);
+      return dt.getFullYear() + "-" + String(dt.getMonth()+1).padStart(2,"0") + "-" + String(dt.getDate()).padStart(2,"0"); }
+    function mk(date, amount, category, description, paidDate) {
+      return { id:"demo-" + (++id), date:date, amount:amount, category:category,
+        description:description, paid:!!paidDate, paid_date:paidDate || null };
+    }
+    DEMO_EXP = [
+      mk(iso(Y,M,D-2), 286.5, "utilities", "七月水电", null),
+      mk(iso(Y,M,D), 99, "mobile", "手机话费", null),
+      mk(iso(Y,M,D+3), 5200, "aden-edu", "秋季学费第一期", null),
+      mk(iso(Y,M,D+12), 410, "home", "物业费", null),
+      mk(iso(Y,M,D+21), 120, "internet", "宽带", null),
+      mk(iso(Y,M,D-18), 3450, "borrow", "机票（我先付）", null),
+      mk(iso(Y,M,D-5), 620, "borrow", "Aden 球鞋（我先付）", null),
+      mk(iso(Y,M,D-40), 900, "borrow", "上月超市", iso(Y,M,3)),
+      mk(iso(Y,M,2), 1580, "food", "超市采购", iso(Y,M,5)),
+      mk(iso(Y,M,1), 300, "transport", "地铁充值", iso(Y,M,2)),
+      mk(iso(Y,M,6), 800, "aden-sports", "游泳课", iso(Y,M,8))
+    ];
+    var cats = ["food","aden-edu","utilities","transport","entertainment","home","aden-sports","medical"];
+    for (var i = 1; i <= 12; i++) {
+      DEMO_EXP.push(mk(iso(Y,M-i,5), 4000, "living", "生活费", iso(Y,M-i,6)));
+      DEMO_EXP.push(mk(iso(Y,M-i,12), 200 + ((i*733) % 1400), cats[i % cats.length], "", iso(Y,M-i,14)));
+      if (i % 3 === 0) DEMO_EXP.push(mk(iso(Y,M-i,20), 500 + i*40, "borrow", "我垫付", iso(Y,M-i+1,2)));
+    }
+  }
+  function demoSummary() {
+    var today = todayStr(), s = { due_now:0, due_now_count:0, upcoming:0, upcoming_count:0, borrow_owed:0, borrow_owed_count:0 };
+    DEMO_EXP.forEach(function (e) {
+      if (e.paid) return;
+      if (isBorrow(e)) { s.borrow_owed += Number(e.amount); s.borrow_owed_count++; return; }
+      var d = daysBetween(today, e.date);
+      if (d <= 0) { s.due_now += Number(e.amount); s.due_now_count++; }
+      else if (d <= 30) { s.upcoming += Number(e.amount); s.upcoming_count++; }
+    });
+    return s;
+  }
+  function demoApi(name, body) {
+    demoInit();
+    return new Promise(function (resolve) { setTimeout(function () {
+      function find(id) { return DEMO_EXP.filter(function (e) { return e.id === id; })[0]; }
+      if (name === "list") { resolve({ ok:true, expenses:DEMO_EXP.slice(), summary:demoSummary() }); }
+      else if (name === "submit") {
+        DEMO_EXP.push({ id:"demo-n" + Date.now(), date:body.date, amount:body.amount,
+          category:body.category, description:body.description, paid:false, paid_date:null });
+        resolve({ ok:true });
+      } else if (name === "update") { var e = find(body.id); if (e) { for (var k in body.fields) e[k] = body.fields[k]; } resolve({ ok:true }); }
+      else if (name === "delete") { DEMO_EXP = DEMO_EXP.filter(function (e) { return e.id !== body.id; }); resolve({ ok:true }); }
+      else if (name === "mark-paid") { var e2 = find(body.id); if (e2) { e2.paid = !!body.paid; e2.paid_date = body.paid ? (body.paid_date || todayStr()) : null; } resolve({ ok:true }); }
+      else if (name === "history") { var e3 = find(body.id);
+        resolve({ ok:true, history:[{ changed_at: todayStr() + "T09:12", action:"create", changed_by:"demo", snapshot:{ amount: e3 ? e3.amount : 0 } }] }); }
+      else resolve({ ok:true });
+    }, 60); });
+  }
+
   // ---- init ----
   $("date").value = todayStr();
   applyLang();
   refresh();
 })();
 </script>
-</body>
-</html>
+
+
+</body></html>

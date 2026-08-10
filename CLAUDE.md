@@ -59,7 +59,13 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 
 ## Current state (2026-08-11)
 
-**v0.6.0 is committed, NOT deployed.** Portal redesign: three tabs (Due ·
+**v0.7.0 — portal visual design by Claude Design (Fable):** typographic
+ledger, warm paper, cinnabar accent, designed dark mode, Chinese-first metrics.
+The hard constraints (zero external requests, CJK stack, esc() on every
+interpolation, category keys pinned to store.CATEGORIES) are enforced by tests —
+verify any future design pass against them before installing.
+
+**v0.6.0 introduced the three-tab portal.** Portal redesign: three tabs (Due ·
 History · Stats), compact list instead of cards, due-aware totals, `borrow` as
 the one category with arithmetic, and the portal now speaks in HER voice (the
 owner works through the MCP). Charts are hand-rolled SVG — no library, no CDN.

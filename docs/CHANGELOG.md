@@ -14,6 +14,35 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: health + portal routes OK.
 
+## [0.7.0] — 2026-08-11
+
+### Changed
+- **Portal visual design, by Claude Design (Fable).** "The page IS the paper" —
+  a typographic ledger rather than a stack of cards: warm paper ground, cinnabar
+  seal-red accent, green stamp for paid, blue ink for money owed back, hairline
+  rules instead of boxes. Dark mode is a designed night-ink palette, not an
+  inverted light one. Chinese-first metrics (medium weights, 1.6 line-height,
+  tabular numerals) — the gap the previous pass left, where Latin-shaped weights
+  were inherited by CJK. Also adopts `font:-apple-system-body`, so the portal
+  now tracks iOS Dynamic Type.
+- Verified against the hard constraints before installing, not assumed: zero
+  external requests (no CDN font, script, or image — the property that makes
+  this load behind the GFW), CJK font stack intact, API wiring and
+  token-from-path preserved, all 17 category keys still matching
+  `store.CATEGORIES`, both language label sets complete, and no unescaped
+  `catLabel`. The escaping and category-parity tests pass unchanged.
+- **"What I paid for" → "Money I lent"** (English only). Her lending is not
+  everything she pays for, so the old label over-claimed. 垫付 already means
+  precisely "advanced on someone's behalf", so the Chinese was never the loose
+  one. "I fronted" / "I paid" → "I lent" across the state chip, tile, chart
+  title and category label.
+- **Monthly bar labels round to thousands** — ¥22k, ¥9.8k, exact below ¥1,000.
+  Twelve full figures across a ~320px viewBox bled into each other. Chart-only;
+  the History tab still carries exact amounts, so nothing is lost.
+
+### Removed
+- The artifact wrapper the design arrived in. `.DS_Store` is now gitignored.
+
 ## [0.6.0] — 2026-08-11
 
 ### Added

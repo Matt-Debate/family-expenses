@@ -8,3 +8,6 @@ __pycache__/
 
 # Local environment — never commit; DATABASE_URL comes from Secret Manager in production
 .env
+
+# macOS finder metadata — recurs constantly, never belongs in the tree
+.DS_Store
