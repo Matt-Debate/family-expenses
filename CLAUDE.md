@@ -30,7 +30,7 @@ annotations. Server `instructions` is bonus, never the only home of a rule.
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 98 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 105 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link
 DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post-deploy
@@ -59,7 +59,12 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 
 ## Current state (2026-08-11)
 
-**v0.5.0 is committed, NOT deployed.** Adds `expenses_list_links` (10th tool)
+**v0.6.0 is committed, NOT deployed.** Portal redesign: three tabs (Due ·
+History · Stats), compact list instead of cards, due-aware totals, `borrow` as
+the one category with arithmetic, and the portal now speaks in HER voice (the
+owner works through the MCP). Charts are hand-rolled SVG — no library, no CDN.
+
+**v0.5.0 is deployed.** Adds `expenses_list_links` (10th tool)
 and optional portal OAuth (Auth0 Universal Login, `app/auth.py`). OAuth is
 **off** until `AUTH0_DOMAIN`/`AUTH0_CLIENT_ID`/`AUTH0_CLIENT_SECRET`/
 `SESSION_SECRET` are all set, so deploying it changes nothing by itself.
@@ -71,7 +76,7 @@ fixed a stored XSS in the portal — an unescaped category label reaching
 `innerHTML` which, combined with the unauthenticated `/mcp`, let any caller who
 knew the URL plant markup that exfiltrates her portal token. Live smoke passed
 and A8 was re-verified across the revision change: same URL, `/mcp` still
-header-free, `MCP_SECRET` still unset. The suite is 98 tests.
+header-free, `MCP_SECRET` still unset. The suite is 105 tests.
 
 **Nothing blocks human onboarding now** — Wave 6 in `docs/FIRST_DEPLOY_PLAN.md`
 is cleared and waiting on the five human steps.

@@ -14,6 +14,54 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: health + portal routes OK.
 
+## [0.6.0] — 2026-08-11
+
+### Added
+- **Three-tab portal.** Due · History · Stats, tabs at the top with the summary
+  cards inside the Due pane so they only appear where they apply.
+- **Stats tab**, hand-rolled inline SVG — no chart library, because the
+  no-build-step / no-CDN property is what makes the portal load on a phone in
+  mainland China. Matt's payments by month, spend by category, and a borrow
+  block: outstanding, fronted, repaid, and **average days to repay** (derived
+  from fronted-date → repaid-date, which the ledger already stored).
+- **Expandable months** in History; open months are component state so marking
+  something paid from inside one does not snap it shut.
+- `PORTAL_DEV_RELOAD=1` re-reads portal.html per request. Off by default, so
+  production still serves from memory.
+
+### Changed
+- **Cards → compact list.** Two lines per item, hairline separators, actions
+  revealed on tap. This screen is read far more than it is touched; every row of
+  chrome was costing a row of ledger.
+- **Mobile overlap fixed.** The old `.meta` flex row let the due date and
+  category collide under ~400px. The sub-line is one wrapping text run now, and
+  descriptions carry `min-width:0` so they cannot push the amount off-screen.
+- **"Date" is "Due date" throughout** — the ledger answers *when must this be
+  paid*, not *when was it entered*.
+- **The portal speaks in her voice.** It is her surface; the owner works through
+  the MCP. "Owed to her" → 待还我 / "Owed to me"; the borrow category is 我垫付 /
+  "I paid (owed back)".
+- **Spend figures name Matt** rather than claiming to be household totals — she
+  spends too, and the ledger only sees what passes through it. Labelling them
+  "Monthly spend" quietly erased her side.
+- Removed the submitted_by field from the add form: only one person enters via
+  the portal, so it asked a question with one answer. The column stays; history
+  rows reference it.
+- Category taxonomy replaced with the household's real one — living, the four
+  Aden buckets, utilities/internet/mobile, and `borrow`.
+
+### Fixed
+- Chart marks are one hue in both modes. The theme's amber and violet fail the
+  dark-surface lightness band as marks (they are tuned as text) — caught by
+  running the palette validator rather than eyeballing it. Both charts compare
+  magnitude, which wants sequential anyway.
+
+### Tests
+- Suite 102 → **105**: category parity between portal.html and store.CATEGORIES
+  in both languages, and that the portal special-cases exactly the key the store
+  does. Two hand-maintained lists that silently disagree would route spending
+  into a bucket nobody looks at.
+
 ## [0.5.0] — 2026-08-11
 
 ### Added

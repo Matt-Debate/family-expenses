@@ -185,5 +185,46 @@ class PortalEscapingTests(unittest.TestCase):
         self.assertEqual(r.json()["expense"]["category"], payload)
 
 
+class CategoryParityTests(unittest.TestCase):
+    """The portal's category list and app/store.py CATEGORIES must not drift.
+
+    They are two hand-maintained lists in two languages. If the portal offers a
+    key analytics does not group by (or vice versa), spending quietly lands in a
+    bucket nobody looks at — the kind of wrong that never raises an error.
+    """
+
+    PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+
+    def test_portal_offers_exactly_the_canonical_categories(self):
+        from app.store import CATEGORY_KEYS
+
+        html = self.PORTAL.read_text(encoding="utf-8")
+        block = re.search(r"var CATS = \[(.*?)\];", html, re.S)
+        self.assertIsNotNone(block, "could not find the CATS array in portal.html")
+        portal_keys = tuple(re.findall(r'"([^"]+)"', block.group(1)))
+        self.assertEqual(portal_keys, CATEGORY_KEYS)
+
+    def test_portal_labels_every_category_in_both_languages(self):
+        from app.store import CATEGORY_KEYS
+
+        html = self.PORTAL.read_text(encoding="utf-8")
+        for lang in ("zh", "en"):
+            start = html.index(f"{lang}: {{")
+            cat = html.index("cat:{", start)
+            labels = html[cat:html.index("act:{", cat)]
+            for key in CATEGORY_KEYS:
+                self.assertRegex(
+                    labels, rf'"?{re.escape(key)}"?\s*:',
+                    f"{lang} is missing a label for category {key!r}",
+                )
+
+    def test_borrow_is_the_category_with_arithmetic(self):
+        """The portal must special-case exactly the key the store does."""
+        from app.store import BORROW_CATEGORY
+
+        html = self.PORTAL.read_text(encoding="utf-8")
+        self.assertIn(f'var BORROW = "{BORROW_CATEGORY}"', html)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -20,9 +20,22 @@ from . import auth
 from .api import HANDLERS
 from .store import Store
 
-_PORTAL_HTML = (Path(__file__).resolve().parent / "portal.html").read_text(
-    encoding="utf-8"
-)
+_PORTAL_PATH = Path(__file__).resolve().parent / "portal.html"
+_PORTAL_HTML = _PORTAL_PATH.read_text(encoding="utf-8")
+
+
+def _portal_html() -> str:
+    """The portal page, read once at import.
+
+    ``PORTAL_DEV_RELOAD=1`` re-reads from disk per request so a UI edit is a
+    browser refresh instead of a server restart. Opt-in by an explicit env var
+    rather than inferred from the environment, so production and local run the
+    same code path unless someone deliberately says otherwise — production never
+    sets it, and a stat+read per page load is not a cost worth paying there.
+    """
+    if os.environ.get("PORTAL_DEV_RELOAD") == "1":
+        return _PORTAL_PATH.read_text(encoding="utf-8")
+    return _PORTAL_HTML
 
 _INVALID_LINK_HTML = """<!doctype html><html lang="zh"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -82,7 +95,7 @@ def build_routes(store: Store) -> list[Route]:
             return RedirectResponse(
                 f"/login?next={quote(request.url.path, safe='/')}", status_code=302
             )
-        return HTMLResponse(_PORTAL_HTML)
+        return HTMLResponse(_portal_html())
 
     def make_api_endpoint(handler):
         async def endpoint(request: Request):

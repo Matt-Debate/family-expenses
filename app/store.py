@@ -54,7 +54,7 @@ CATEGORIES = (
     ("entertainment", "娱乐",         "Entertainment"),
     ("clothes",       "衣服",         "Clothes"),
     ("medical",       "医疗",         "Medical"),
-    ("borrow",        "垫付",         "Borrowed / fronted"),
+    ("borrow",        "我垫付",       "I paid (owed back to me)"),
     ("other",         "其他",         "Other"),
 )
 CATEGORY_KEYS = tuple(key for key, _zh, _en in CATEGORIES)

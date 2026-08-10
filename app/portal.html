@@ -2,68 +2,167 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>家庭开支 · Family Expenses</title>
 <style>
   :root {
-    --bg:#f6f7f9; --card:#ffffff; --text:#1a1d21; --muted:#6b7280;
-    --border:#e5e7eb; --accent:#2563eb; --accent-soft:#dbeafe;
-    --danger:#dc2626; --ok:#16a34a; --unpaid:#b45309; --unpaid-soft:#fef3c7;
+    --bg:#f5f6f8; --card:#ffffff; --text:#15181c; --muted:#6b7280;
+    --line:#e4e7eb; --accent:#2563eb; --accent-soft:#e8f0fe;
+    --danger:#dc2626; --ok:#15803d;
+    --due:#b45309; --due-soft:#fef3c7;
+    --lend:#7c3aed; --lend-soft:#f3e8ff;
+    --radius:14px;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#0f1115; --card:#181b20; --text:#e7e9ec; --muted:#9aa2ad;
-      --border:#2a2f37; --accent:#3b82f6; --accent-soft:#1e3a5f;
-      --unpaid:#fbbf24; --unpaid-soft:#3b2f0b; }
+    :root { --bg:#0e1013; --card:#171a1f; --text:#e8eaed; --muted:#9aa2ad;
+      --line:#282d35; --accent:#4b8bf5; --accent-soft:#16273f;
+      --ok:#4ade80; --due:#fbbf24; --due-soft:#3a2c08;
+      --lend:#c4a5fb; --lend-soft:#2a1f3d; }
   }
   * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
   body { margin:0; background:var(--bg); color:var(--text); line-height:1.5;
-    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,sans-serif; }
-  header { position:sticky; top:0; z-index:5; background:var(--card);
-    border-bottom:1px solid var(--border); padding:12px 16px;
-    display:flex; justify-content:space-between; align-items:center; }
-  header h1 { font-size:1.1rem; margin:0; }
-  .wrap { max-width:560px; margin:0 auto; padding:14px; }
-  .card { background:var(--card); border:1px solid var(--border);
-    border-radius:14px; padding:14px; margin-bottom:14px; }
-  .totals { display:flex; gap:10px; }
-  .totals .box { flex:1; border-radius:12px; padding:10px 12px; background:var(--card);
-    border:1px solid var(--border); }
-  .totals .k { font-size:.75rem; color:var(--muted); }
-  .totals .v { font-size:1.25rem; font-weight:700; }
-  .totals .unpaid .v { color:var(--unpaid); }
-  label { display:block; font-size:.78rem; color:var(--muted); margin:8px 0 3px; font-weight:600; }
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,sans-serif;
+    font-size:16px; }
+
+  header { position:sticky; top:0; z-index:20; background:var(--card);
+    border-bottom:1px solid var(--line); padding:10px 14px;
+    padding-top:calc(10px + env(safe-area-inset-top));
+    display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  header h1 { font-size:1rem; margin:0; font-weight:650; letter-spacing:.01em; }
+  .wrap { max-width:560px; margin:0 auto; padding:12px 12px 40px; }
+
+  /* ---- summary cards ---- */
+  .cards { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+    padding:10px 12px; min-width:0; }
+  .card.wide { grid-column:1 / -1; }
+  .card .k { font-size:.72rem; color:var(--muted); font-weight:600;
+    display:flex; align-items:center; gap:5px; }
+  .card .v { font-size:1.3rem; font-weight:700; margin-top:1px;
+    overflow-wrap:anywhere; line-height:1.2; }
+  .card .n { font-size:.7rem; color:var(--muted); }
+  .card.due .v { color:var(--due); }
+  .card.lend .v { color:var(--lend); }
+  .dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
+  .dot.due { background:var(--due); } .dot.lend { background:var(--lend); }
+  .dot.ok { background:var(--ok); } .dot.soon { background:var(--muted); }
+
+  /* ---- tabs ---- */
+  .tabs { display:flex; gap:4px; background:var(--card); border:1px solid var(--line);
+    border-radius:999px; padding:4px; margin-bottom:12px; }
+  .tab { flex:1; text-align:center; padding:8px 4px; border-radius:999px;
+    font-size:.85rem; font-weight:600; cursor:pointer; border:0;
+    background:transparent; color:var(--muted); min-width:0; }
+  .tab.on { background:var(--accent); color:#fff; }
+
+  /* ---- forms ---- */
+  label { display:block; font-size:.74rem; color:var(--muted); margin:9px 0 3px; font-weight:600; }
   input, select, button, textarea { font:inherit; width:100%; color:var(--text);
-    background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 12px; }
+    background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
   input:focus, select:focus { outline:2px solid var(--accent); border-color:var(--accent); }
-  .row { display:flex; gap:10px; } .row > * { flex:1; min-width:0; }
+  .row { display:flex; gap:10px; } .row > * { flex:1 1 0; min-width:0; }
   button.primary { background:var(--accent); border-color:var(--accent); color:#fff;
-    font-weight:700; margin-top:12px; cursor:pointer; font-size:1.05rem; padding:12px; }
-  .chips { display:flex; gap:8px; margin:2px 0 12px; }
-  .chip { flex:1; text-align:center; padding:8px 4px; border-radius:999px; cursor:pointer;
-    border:1px solid var(--border); background:var(--card); font-size:.9rem; }
-  .chip.on { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
-  .item { border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px;
-    background:var(--card); }
-  .item .top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
-  .item .desc { font-weight:600; overflow-wrap:anywhere; }
-  .item .amt { font-size:1.15rem; font-weight:700; white-space:nowrap; }
-  .item .meta { font-size:.8rem; color:var(--muted); margin-top:2px; display:flex;
-    flex-wrap:wrap; gap:4px 10px; align-items:center; }
-  .badge { font-size:.72rem; padding:2px 8px; border-radius:999px; font-weight:600; }
-  .badge.unpaid { background:var(--unpaid-soft); color:var(--unpaid); }
-  .badge.paid { background:var(--accent-soft); color:var(--accent); }
-  .btns { display:flex; gap:8px; margin-top:10px; }
-  .btns button { padding:8px 6px; font-size:.85rem; cursor:pointer; border-radius:8px; }
-  .btns .pay { color:var(--ok); border-color:var(--ok); font-weight:600; }
+    font-weight:700; margin-top:12px; cursor:pointer; font-size:1rem; padding:12px; }
+  .panel { background:var(--card); border:1px solid var(--line);
+    border-radius:var(--radius); padding:12px 14px; margin-bottom:12px; }
+  details.add summary { cursor:pointer; font-weight:650; font-size:.92rem;
+    list-style:none; display:flex; align-items:center; gap:8px; }
+  details.add summary::-webkit-details-marker { display:none; }
+  details.add summary::before { content:"＋"; color:var(--accent); font-weight:800; }
+  details.add[open] summary::before { content:"−"; }
+
+  /* ---- section headings ---- */
+  .sec { display:flex; align-items:baseline; justify-content:space-between;
+    gap:8px; margin:16px 2px 8px; }
+  .sec h2 { font-size:.8rem; margin:0; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.06em; font-weight:700; }
+  .sec .tot { font-size:.8rem; color:var(--muted); font-variant-numeric:tabular-nums; }
+
+  /* ---- expense list ----
+     A dense list, not cards: this screen is read far more often than it is
+     touched, so every row of chrome costs a row of ledger. Two lines per item,
+     hairline separators, actions revealed on tap. The old .meta flex row let
+     the due date and category collide under ~400px; the sub-line is a single
+     wrapping text run now, so there is nothing left to overlap. */
+  .list { background:var(--card); border:1px solid var(--line);
+    border-radius:var(--radius); overflow:hidden; }
+  .item + .item { border-top:1px solid var(--line); }
+  .item.open { background:var(--accent-soft); }
+  .ex-hd { display:flex; gap:10px; align-items:baseline; padding:9px 12px; cursor:pointer; }
+  .ex-txt { flex:1 1 auto; min-width:0; }
+  .ex-desc { font-weight:600; overflow-wrap:anywhere; line-height:1.35; }
+  .ex-sub { font-size:.75rem; color:var(--muted); margin-top:1px; overflow-wrap:anywhere; }
+  .ex-amt { flex:0 0 auto; white-space:nowrap; font-weight:650;
+    font-variant-numeric:tabular-nums; }
+  .st { font-weight:650; }
+  .st.due  { color:var(--due); }
+  .st.paid { color:var(--ok); }
+  .st.soon { color:var(--muted); }
+  .st.lend { color:var(--lend); }
+  .item.paid .ex-desc, .item.paid .ex-amt { color:var(--muted); font-weight:550; }
+  .btns { display:flex; gap:6px; padding:0 12px 10px; }
+  .btns button { padding:7px 4px; font-size:.78rem; cursor:pointer; border-radius:9px; }
+  .btns .pay { color:var(--ok); border-color:var(--ok); font-weight:650; }
   .btns .del { color:var(--danger); }
-  .editbox, .histbox { margin-top:10px; border-top:1px dashed var(--border); padding-top:8px; }
-  .hist { font-size:.78rem; color:var(--muted); margin:4px 0; }
-  .empty { text-align:center; color:var(--muted); padding:26px 0; }
-  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:22px; z-index:9;
+  .editbox, .histbox { padding:0 12px 10px; }
+  .hist { font-size:.75rem; color:var(--muted); margin:3px 0; overflow-wrap:anywhere; }
+  .empty { text-align:center; color:var(--muted); padding:20px 8px; font-size:.88rem; }
+
+  /* ---- history (statement) table ---- */
+  .stmt { width:100%; border-collapse:collapse; font-size:.86rem; }
+  .stmt th { text-align:right; font-size:.68rem; color:var(--muted); font-weight:700;
+    text-transform:uppercase; letter-spacing:.05em; padding:0 0 7px; }
+  .stmt th:first-child { text-align:left; }
+  .stmt td { padding:9px 0; border-top:1px solid var(--line); text-align:right;
+    font-variant-numeric:tabular-nums; }
+  .stmt td:first-child { text-align:left; font-weight:650; }
+  .stmt td.n { color:var(--muted); font-size:.8rem; }
+  .stmt td.out { color:var(--due); font-weight:650; }
+  .stmt td.zero { color:var(--line); }
+  .stmt tr.mrow { cursor:pointer; }
+  .stmt tr.mrow:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+  .caret { display:inline-block; width:1em; color:var(--muted);
+    transition:transform .15s; transform:translateY(-1px); }
+  .stmt tr.mrow.open .caret { transform:rotate(90deg); }
+  /* the expanded month: full-bleed inside the cell, no table padding fighting it */
+  .stmt tr.drow > td { padding:0 0 10px; border-top:0; }
+  .detail .list { border-radius:10px; }
+
+  /* ---- stats ----
+     Chart marks are ONE hue in both modes. The theme's amber and violet are
+     tuned as text on a dark surface and fail the mark lightness band there, so
+     identity is carried by labels, not by hue. Both charts compare magnitude,
+     which wants sequential anyway. */
+  .viz { --mark:#2563eb; --grid:#e4e7eb; --axis:#c3c2b7; }
+  @media (prefers-color-scheme: dark) { .viz { --mark:#4b8bf5; --grid:#282d35; --axis:#383835; } }
+  .kpi { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+  .kpi .t { background:var(--card); border:1px solid var(--line);
+    border-radius:var(--radius); padding:10px 12px; min-width:0; }
+  .kpi .t .k { font-size:.7rem; color:var(--muted); font-weight:600; }
+  /* proportional figures, not tabular — equal-width digits read loose at this size */
+  .kpi .t .v { font-size:1.15rem; font-weight:700; margin-top:1px; overflow-wrap:anywhere; }
+  .kpi .t .s { font-size:.68rem; color:var(--muted); }
+  .chart { background:var(--card); border:1px solid var(--line);
+    border-radius:var(--radius); padding:12px 12px 10px; margin-bottom:12px; }
+  .chart h3 { font-size:.78rem; margin:0 0 2px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  .chart .cap { font-size:.7rem; color:var(--muted); margin-bottom:10px; }
+  .chart svg { width:100%; height:auto; display:block; overflow:visible; }
+  .chart text { fill:var(--muted); font-size:9.5px;
+    font-family:inherit; font-variant-numeric:tabular-nums; }
+  .chart text.val { fill:var(--text); font-weight:700; }
+  .chart text.name { fill:var(--text); font-size:10px; }
+  .chart .bar { fill:var(--mark); }
+  .chart .grid { stroke:var(--grid); stroke-width:1; }
+  .chart .base { stroke:var(--axis); stroke-width:1; }
+
+  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:22px; z-index:40;
     background:var(--text); color:var(--bg); border-radius:10px; padding:10px 18px;
-    font-size:.9rem; opacity:0; transition:opacity .25s; pointer-events:none; }
-  .toast.show { opacity:.95; }
-  .lang { width:auto; padding:6px 12px; border-radius:999px; cursor:pointer; font-size:.85rem; }
+    font-size:.9rem; opacity:0; transition:opacity .2s; pointer-events:none; }
+  .toast.show { opacity:.96; }
+  .lang { width:auto; padding:6px 12px; border-radius:999px; cursor:pointer;
+    font-size:.8rem; flex:0 0 auto; }
 </style>
 </head>
 <body>
@@ -73,41 +172,39 @@
 </header>
 
 <div class="wrap">
-  <div class="totals">
-    <div class="box unpaid"><div class="k" data-i18n="unpaid_total"></div><div class="v" id="unpaidTotal">–</div></div>
-    <div class="box"><div class="k" data-i18n="paid_total"></div><div class="v" id="paidTotal">–</div></div>
+  <div class="tabs" id="tabs">
+    <button class="tab on" data-tab="now"></button>
+    <button class="tab" data-tab="history"></button>
+    <button class="tab" data-tab="stats"></button>
   </div>
 
-  <div class="card">
-    <form id="addForm">
-      <label for="amount" data-i18n="amount"></label>
-      <input id="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required placeholder="0.00">
-      <label for="desc" data-i18n="desc"></label>
-      <input id="desc" type="text" data-i18n-ph="desc_ph">
-      <div class="row">
-        <div>
-          <label for="date" data-i18n="date"></label>
-          <input id="date" type="date" required>
+  <section id="pane-now">
+    <div class="cards" id="cards"></div>
+    <details class="add" id="addWrap">
+      <summary data-i18n="add"></summary>
+      <form id="addForm">
+        <div class="row">
+          <div>
+            <label for="amount" data-i18n="amount"></label>
+            <input id="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required placeholder="0.00">
+          </div>
+          <div>
+            <label for="date" data-i18n="due"></label>
+            <input id="date" type="date" required>
+          </div>
         </div>
-        <div>
-          <label for="category" data-i18n="category"></label>
-          <select id="category"></select>
-        </div>
-      </div>
-      <label for="who" data-i18n="who"></label>
-      <input id="who" type="text" data-i18n-ph="who_ph">
-      <button type="submit" class="primary" data-i18n="add"></button>
-    </form>
-  </div>
+        <label for="desc" data-i18n="desc"></label>
+        <input id="desc" type="text" data-i18n-ph="desc_ph">
+        <label for="category" data-i18n="category"></label>
+        <select id="category"></select>
+        <button type="submit" class="primary" data-i18n="save_new"></button>
+      </form>
+    </details>
+    <div id="nowBody"></div>
+  </section>
 
-  <div class="chips" id="chips">
-    <div class="chip" data-f="all"></div>
-    <div class="chip" data-f="unpaid"></div>
-    <div class="chip" data-f="paid"></div>
-  </div>
-
-  <div id="list"></div>
-  <div class="empty" id="empty" style="display:none" data-i18n="empty"></div>
+  <section id="pane-history" hidden><div class="panel" id="historyBody"></div></section>
+  <section id="pane-stats" hidden><div id="statsBody"></div></section>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -116,53 +213,96 @@
   "use strict";
   var TOKEN = (location.pathname.match(/^\/t\/([^/]+)/) || [])[1] || "";
 
-  var CATS = ["food","kids","home","transport","medical","other"];
-  var STR = {
-    zh: { title:"家庭开支", unpaid_total:"待付合计", paid_total:"已付合计",
-      amount:"金额 (¥)", desc:"内容", desc_ph:"买了什么 / 给谁付", date:"日期",
-      category:"分类", who:"记录人", who_ph:"你的名字", add:"＋ 添加开支",
-      all:"全部", unpaid:"待付", paid:"已付", empty:"还没有记录，添加第一笔吧",
-      mark_paid:"✓ 标记已付", unmark:"取消已付", edit:"编辑", del:"删除",
-      hist:"记录", save:"保存", cancel:"取消", paid_on:"付款日期",
-      confirm_del:"确定删除这条开支？", badge_unpaid:"待付", badge_paid:"已付",
-      by:"记录人", added:"已添加", saved:"已保存", deleted:"已删除",
-      marked:"已标记付款", unmarked:"已恢复待付", err:"出错了，请重试",
-      link_err:"链接无效或已过期",
-      cat: { food:"餐饮食品", kids:"孩子", home:"家居生活", transport:"交通",
-             medical:"医疗健康", other:"其他" },
-      act: { create:"创建", update:"修改", mark_paid:"标记已付",
-             unmark_paid:"取消已付", "delete":"删除" } },
-    en: { title:"Family Expenses", unpaid_total:"To pay", paid_total:"Paid",
-      amount:"Amount (¥)", desc:"Description", desc_ph:"what / who to pay", date:"Date",
-      category:"Category", who:"Your name", who_ph:"your name", add:"＋ Add expense",
-      all:"All", unpaid:"To pay", paid:"Paid", empty:"Nothing yet — add the first one",
-      mark_paid:"✓ Mark paid", unmark:"Unmark paid", edit:"Edit", del:"Delete",
-      hist:"History", save:"Save", cancel:"Cancel", paid_on:"Paid on",
-      confirm_del:"Delete this expense?", badge_unpaid:"to pay", badge_paid:"paid",
-      by:"by", added:"Added", saved:"Saved", deleted:"Deleted",
-      marked:"Marked paid", unmarked:"Back to unpaid", err:"Something went wrong",
-      link_err:"This link is invalid or expired",
-      cat: { food:"Food", kids:"Kids", home:"Home", transport:"Transport",
-             medical:"Medical", other:"Other" },
-      act: { create:"created", update:"edited", mark_paid:"marked paid",
-             unmark_paid:"unmarked", "delete":"deleted" } },
-  };
-  var lang = localStorage.getItem("fe.lang") || "zh";
-  var filter = "unpaid";
-  var expenses = [];
+  // Category keys mirror app/store.py CATEGORIES — CategoryParityTests fails
+  // if the two lists drift apart.
+  var CATS = ["living","aden-edu","aden-sports","aden-clothes","aden-other",
+              "food","home","utilities","internet","mobile","transport",
+              "travel","entertainment","clothes","medical","borrow","other"];
+  var BORROW = "borrow";
 
-  function t(key) { return STR[lang][key] || key; }
+  var STR = {
+    zh: { title:"家庭开支", due_now:"待付", upcoming:"即将到期", lent:"待还我",
+      paid_month:"本月已付", add:"添加一笔", amount:"金额 (¥)", due:"到期日",
+      desc:"内容", desc_ph:"买了什么 / 给谁付", category:"分类", save_new:"添加",
+      tab_now:"待付", tab_history:"记录", tab_stats:"分析",
+      sec_due:"待付 · 未来30天", sec_paid:"本月已付", sec_lent:"待还我",
+      empty_due:"没有待付的", empty_paid:"本月还没有付款记录", empty_all:"还没有记录",
+      mark_paid:"✓ 标记已付", unmark:"取消已付", edit:"编辑", del:"删除", hist:"记录",
+      save:"保存", cancel:"取消", paid_on:"付款日期", confirm_del:"确定删除这条？",
+      st_due:"已到期", st_soon:"未到期", st_paid:"已付", st_lent:"我垫付",
+      overdue_by:"逾期", days:"天", today:"今天", tomorrow:"明天",
+      month:"月份", txns:"笔数", spent:"已付", outstanding:"未付",
+      sec_borrow:"我垫付的", kpi_fronted:"我垫付", kpi_repaid:"已还我",
+      kpi_wait:"平均还款", kpi_items:" 笔", kpi_oldest:"最久",
+      kpi_settled:"都还清了", ch_borrow:"每月垫付", ch_borrow_cap:"近 12 个月",
+      kpi_avg:"Matt 月均", kpi_mo:" 个月", kpi_this:"Matt 本月",
+      kpi_living:"生活费", kpi_aden:"Aden 合计", kpi_12mo:"近 12 个月",
+      ch_monthly:"Matt 每月付款", ch_monthly_cap:"近 12 个月 · Matt 已付，不含我垫付的",
+      ch_cat:"分类占比", ch_cat_cap:"近 12 个月 · Matt 已付",
+      added:"已添加", saved:"已保存", deleted:"已删除", marked:"已标记付款",
+      unmarked:"已恢复待付", err:"出错了，请重试", link_err:"链接无效或已过期",
+      cat:{ living:"生活费","aden-edu":"Aden 教育","aden-sports":"Aden 运动",
+        "aden-clothes":"Aden 衣服","aden-other":"Aden 其他", food:"食品", home:"家居",
+        utilities:"水电", internet:"网络", mobile:"手机", transport:"交通",
+        travel:"旅行", entertainment:"娱乐", clothes:"衣服", medical:"医疗",
+        borrow:"我垫付", other:"其他" },
+      act:{ create:"创建", update:"修改", mark_paid:"标记已付", unmark_paid:"取消已付", "delete":"删除" } },
+    en: { title:"Family Expenses", due_now:"To pay", upcoming:"Upcoming", lent:"Owed to me",
+      paid_month:"Paid this month", add:"Add an expense", amount:"Amount (¥)", due:"Due date",
+      desc:"Description", desc_ph:"what / who to pay", category:"Category", save_new:"Add",
+      tab_now:"Due", tab_history:"History", tab_stats:"Stats",
+      sec_due:"Due · next 30 days", sec_paid:"Paid this month", sec_lent:"Owed to me",
+      empty_due:"Nothing due", empty_paid:"No payments yet this month", empty_all:"Nothing yet",
+      mark_paid:"✓ Mark paid", unmark:"Unmark paid", edit:"Edit", del:"Delete", hist:"History",
+      save:"Save", cancel:"Cancel", paid_on:"Paid on", confirm_del:"Delete this entry?",
+      st_due:"due", st_soon:"upcoming", st_paid:"paid", st_lent:"I paid",
+      overdue_by:"overdue", days:"d", today:"today", tomorrow:"tomorrow",
+      month:"Month", txns:"Txns", spent:"Paid", outstanding:"Outstanding",
+      sec_borrow:"What I paid for", kpi_fronted:"I fronted", kpi_repaid:"Repaid to me",
+      kpi_wait:"Avg to repay", kpi_items:" items", kpi_oldest:"oldest",
+      kpi_settled:"all settled", ch_borrow:"Fronted by month", ch_borrow_cap:"Last 12 months",
+      kpi_avg:"Matt · monthly avg", kpi_mo:" mo", kpi_this:"Matt · this month",
+      kpi_living:"Living", kpi_aden:"Aden total", kpi_12mo:"last 12 months",
+      ch_monthly:"Matt's payments by month", ch_monthly_cap:"Last 12 months · paid by Matt, excludes what I fronted",
+      ch_cat:"By category", ch_cat_cap:"Last 12 months · paid by Matt",
+      added:"Added", saved:"Saved", deleted:"Deleted", marked:"Marked paid",
+      unmarked:"Back to unpaid", err:"Something went wrong", link_err:"This link is invalid or expired",
+      cat:{ living:"Living","aden-edu":"Aden · education","aden-sports":"Aden · sports",
+        "aden-clothes":"Aden · clothes","aden-other":"Aden · other", food:"Food", home:"Home",
+        utilities:"Utilities", internet:"Internet", mobile:"Mobile", transport:"Transport",
+        travel:"Travel", entertainment:"Entertainment", clothes:"Clothes", medical:"Medical",
+        borrow:"I paid (owed back)", other:"Other" },
+      act:{ create:"created", update:"edited", mark_paid:"marked paid", unmark_paid:"unmarked", "delete":"deleted" } },
+  };
+
+  var lang = localStorage.getItem("fe.lang") || "zh";
+  var tab = "now";
+  var expenses = [];
+  var summary = {};
+
+  function t(key) { var v = STR[lang][key]; return typeof v === "string" ? v : key; }
   function $(id) { return document.getElementById(id); }
-  function today() {
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+  function money(n) { return "¥" + Number(n || 0).toLocaleString(undefined,
+    {minimumFractionDigits:2, maximumFractionDigits:2}); }
+  function money0(n) { return "¥" + Math.round(Number(n || 0)).toLocaleString(); }
+  function todayStr() {
     var d = new Date();
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
   }
-  function money(n) { return "¥" + Number(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
-  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+  function daysBetween(a, b) {  // whole days from a to b, both YYYY-MM-DD
+    return Math.round((Date.parse(b + "T00:00:00") - Date.parse(a + "T00:00:00")) / 86400000);
+  }
+  function categoryLabel(e) {
+    var map = STR[lang].cat;
+    return (e.category && map[e.category]) ? map[e.category] : (e.category || "");
+  }
+  function isBorrow(e) { return e.category === BORROW; }
+
   function toast(msg) {
     var el = $("toast"); el.textContent = msg; el.classList.add("show");
-    setTimeout(function () { el.classList.remove("show"); }, 1800);
+    setTimeout(function () { el.classList.remove("show"); }, 1700);
   }
   function api(name, body) {
     body = body || {}; body.token = TOKEN;
@@ -171,7 +311,6 @@
     }).then(function (r) { return r.json().then(function (j) {
       if (!r.ok || !j.ok) { throw new Error(j.error || t("err")); } return j; }); });
   }
-  function who() { return $("who").value.trim() || null; }
 
   // ---- i18n ----
   function applyLang() {
@@ -183,13 +322,15 @@
     Array.prototype.forEach.call(document.querySelectorAll("[data-i18n-ph]"), function (el) {
       el.placeholder = t(el.getAttribute("data-i18n-ph"));
     });
-    Array.prototype.forEach.call(document.querySelectorAll("#chips .chip"), function (el) {
-      el.textContent = t(el.getAttribute("data-f"));
+    Array.prototype.forEach.call(document.querySelectorAll("#tabs .tab"), function (el) {
+      el.textContent = t("tab_" + el.getAttribute("data-tab"));
     });
-    var cat = $("category");
-    cat.innerHTML = CATS.map(function (c) {
-      return '<option value="' + c + '">' + esc(STR[lang].cat[c]) + "</option>";
+    var sel = $("category");
+    var keep = sel.value;
+    sel.innerHTML = CATS.map(function (c) {
+      return '<option value="' + esc(c) + '">' + esc(STR[lang].cat[c] || c) + "</option>";
     }).join("");
+    if (keep) sel.value = keep;
     render();
   }
   $("langBtn").addEventListener("click", function () {
@@ -198,74 +339,425 @@
     applyLang();
   });
 
-  // ---- rendering ----
-  function render() {
-    var list = $("list");
-    var shown = expenses;
-    list.innerHTML = shown.map(function (e) {
-      var catLabel = e.category && STR[lang].cat[e.category] ? STR[lang].cat[e.category] : (e.category || "");
-      return '<div class="item" data-id="' + esc(e.id) + '">' +
-        '<div class="top"><span class="desc">' + (esc(e.description) || esc(catLabel) || "–") + "</span>" +
-        '<span class="amt">' + money(e.amount) + "</span></div>" +
-        '<div class="meta">' +
-          '<span class="badge ' + (e.paid ? "paid" : "unpaid") + '">' + t(e.paid ? "badge_paid" : "badge_unpaid") +
-            (e.paid && e.paid_date ? " · " + esc(e.paid_date) : "") + "</span>" +
-          "<span>" + esc(e.date) + "</span>" +
-          (catLabel ? "<span>" + esc(catLabel) + "</span>" : "") +
-          (e.submitted_by ? "<span>" + t("by") + " " + esc(e.submitted_by) + "</span>" : "") +
+  // ---- tabs ----
+  $("tabs").addEventListener("click", function (ev) {
+    var b = ev.target.closest && ev.target.closest("[data-tab]");
+    if (!b) return;
+    tab = b.getAttribute("data-tab");
+    Array.prototype.forEach.call(document.querySelectorAll("#tabs .tab"), function (el) {
+      el.classList.toggle("on", el.getAttribute("data-tab") === tab);
+    });
+    $("pane-now").hidden = tab !== "now";
+    $("pane-history").hidden = tab !== "history";
+    $("pane-stats").hidden = tab !== "stats";
+    render();
+  });
+
+  // ---- month expand/collapse ----
+  // The expanded rows are siblings of the month row, not descendants, so a tap
+  // on an action button inside a month never bubbles up and collapses it.
+  function toggleMonth(m) {
+    if (openMonths[m]) delete openMonths[m]; else openMonths[m] = true;
+    renderHistory();
+  }
+  $("historyBody").addEventListener("click", function (ev) {
+    var row = ev.target.closest && ev.target.closest("[data-month]");
+    if (row) toggleMonth(row.getAttribute("data-month"));
+  });
+  $("historyBody").addEventListener("keydown", function (ev) {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    var row = ev.target.closest && ev.target.closest("[data-month]");
+    if (!row) return;
+    ev.preventDefault();
+    toggleMonth(row.getAttribute("data-month"));
+  });
+
+  // ---- row expand (reveals the action buttons) ----
+  function toggleItem(id) {
+    if (openItems[id]) delete openItems[id]; else openItems[id] = true;
+    render();
+  }
+  document.addEventListener("click", function (ev) {
+    var hd = ev.target.closest && ev.target.closest(".ex-hd");
+    if (!hd) return;
+    var item = hd.closest(".item");
+    if (item) toggleItem(item.getAttribute("data-id"));
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    var hd = ev.target.closest && ev.target.closest(".ex-hd");
+    if (!hd) return;
+    ev.preventDefault();
+    var item = hd.closest(".item");
+    if (item) toggleItem(item.getAttribute("data-id"));
+  });
+
+  // ---- summary cards ----
+  function renderCards() {
+    var s = summary || {};
+    var paidMonth = expenses.filter(function (e) {
+      return e.paid && !isBorrow(e) && (e.paid_date || "").slice(0,7) === todayStr().slice(0,7);
+    }).reduce(function (a, e) { return a + Number(e.amount || 0); }, 0);
+    var html =
+      '<div class="card due"><div class="k"><span class="dot due"></span>' + esc(t("due_now")) + '</div>' +
+        '<div class="v">' + esc(money0(s.due_now)) + '</div>' +
+        '<div class="n">' + esc(String(s.due_now_count || 0)) + '</div></div>' +
+      '<div class="card"><div class="k"><span class="dot ok"></span>' + esc(t("paid_month")) + '</div>' +
+        '<div class="v">' + esc(money0(paidMonth)) + '</div>' +
+        '<div class="n">&nbsp;</div></div>';
+    if (s.upcoming_count) {
+      html += '<div class="card"><div class="k"><span class="dot soon"></span>' + esc(t("upcoming")) + '</div>' +
+        '<div class="v">' + esc(money0(s.upcoming)) + '</div>' +
+        '<div class="n">' + esc(String(s.upcoming_count)) + '</div></div>';
+    }
+    if (s.borrow_owed) {
+      html += '<div class="card lend' + (s.upcoming_count ? '' : ' wide') + '">' +
+        '<div class="k"><span class="dot lend"></span>' + esc(t("lent")) + '</div>' +
+        '<div class="v">' + esc(money0(s.borrow_owed)) + '</div>' +
+        '<div class="n">' + esc(String(s.borrow_owed_count || 0)) + '</div></div>';
+    }
+    $("cards").innerHTML = html;
+  }
+
+  // ---- one list row ----
+  // Returns {cls, text} rather than markup so the caller escapes once, at the
+  // point of interpolation.
+  function stateOf(e) {
+    if (e.paid) return { cls:"paid", text:t("st_paid") + (e.paid_date ? " " + e.paid_date : "") };
+    if (isBorrow(e)) return { cls:"lend", text:t("st_lent") + " " + e.date };
+    var d = daysBetween(todayStr(), e.date);
+    if (d < 0) return { cls:"due", text:t("overdue_by") + " " + (-d) + t("days") };
+    if (d === 0) return { cls:"due", text:t("today") };
+    if (d === 1) return { cls:"due", text:t("tomorrow") };
+    return { cls:"soon", text:e.date };
+  }
+
+  var openItems = {};  // survives the re-render after pay/edit, like openMonths
+
+  function itemHtml(e) {
+    var catLabel = categoryLabel(e);
+    var st = stateOf(e);
+    var open = !!openItems[e.id];
+    var sub = '<span class="st ' + st.cls + '">' + esc(st.text) + "</span>" +
+      (catLabel ? " · " + esc(catLabel) : "");
+    return '<div class="item' + (open ? " open" : "") + (e.paid ? " paid" : "") +
+        '" data-id="' + esc(e.id) + '">' +
+      '<div class="ex-hd" role="button" tabindex="0" aria-expanded="' + (open ? "true" : "false") + '">' +
+        '<div class="ex-txt">' +
+          '<div class="ex-desc">' + (esc(e.description) || esc(catLabel) || "–") + "</div>" +
+          '<div class="ex-sub">' + sub + "</div>" +
         "</div>" +
+        '<div class="ex-amt">' + esc(money(e.amount)) + "</div>" +
+      "</div>" +
+      (open ?
         '<div class="btns">' +
-          '<button class="pay" data-act="pay">' + t(e.paid ? "unmark" : "mark_paid") + "</button>" +
-          '<button data-act="edit">' + t("edit") + "</button>" +
-          '<button data-act="hist">' + t("hist") + "</button>" +
-          '<button class="del" data-act="del">' + t("del") + "</button>" +
+          '<button class="pay" data-act="pay">' + esc(t(e.paid ? "unmark" : "mark_paid")) + "</button>" +
+          '<button data-act="edit">' + esc(t("edit")) + "</button>" +
+          '<button data-act="hist">' + esc(t("hist")) + "</button>" +
+          '<button class="del" data-act="del">' + esc(t("del")) + "</button>" +
         "</div>" +
         '<div class="editbox" style="display:none"></div>' +
-        '<div class="histbox" style="display:none"></div>' +
-        "</div>";
+        '<div class="histbox" style="display:none"></div>'
+        : "") +
+      "</div>";
+  }
+
+  function listHtml(rows) {
+    return '<div class="list">' + rows.map(itemHtml).join("") + "</div>";
+  }
+
+  function section(titleKey, rows, emptyKey) {
+    var total = rows.reduce(function (a, e) { return a + Number(e.amount || 0); }, 0);
+    return '<div class="sec"><h2>' + esc(t(titleKey)) + "</h2>" +
+      (rows.length ? '<span class="tot">' + esc(money0(total)) + "</span>" : "") + "</div>" +
+      (rows.length ? listHtml(rows)
+                   : '<div class="empty">' + esc(t(emptyKey)) + "</div>");
+  }
+
+  // ---- tab 1: what is actually due, then what was actually paid ----
+  function renderNow() {
+    var today = todayStr(), month = today.slice(0, 7);
+    var due = expenses.filter(function (e) {
+      return !e.paid && !isBorrow(e) && daysBetween(today, e.date) <= 30;
+    }).sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+
+    var lent = expenses.filter(function (e) { return !e.paid && isBorrow(e); })
+      .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+
+    var paid = expenses.filter(function (e) {
+      return e.paid && (e.paid_date || "").slice(0, 7) === month;
+    }).sort(function (a, b) {
+      var x = a.paid_date || "", y = b.paid_date || "";
+      return x > y ? -1 : x < y ? 1 : 0;
+    });
+
+    var html = section("sec_due", due, "empty_due");
+    if (lent.length) html += section("sec_lent", lent, "empty_all");
+    html += section("sec_paid", paid, "empty_paid");
+    $("nowBody").innerHTML = html;
+  }
+
+  // ---- tab 2: statement, one row per month, expandable ----
+  // Which months are open is component state, not derived from the data, so it
+  // survives the re-render that follows marking something paid from inside an
+  // expanded month — otherwise the section would snap shut under your finger.
+  var openMonths = {};
+
+  function renderHistory() {
+    var by = {};
+    expenses.forEach(function (e) {
+      var m = (e.date || "").slice(0, 7);
+      if (!m) return;
+      if (!by[m]) by[m] = { m:m, n:0, spent:0, out:0, items:[] };
+      by[m].n += 1;
+      by[m].items.push(e);
+      if (e.paid) by[m].spent += Number(e.amount || 0);
+      else by[m].out += Number(e.amount || 0);
+    });
+    var rows = Object.keys(by).sort().reverse().map(function (k) { return by[k]; });
+    if (!rows.length) { $("historyBody").innerHTML = '<div class="empty">' + esc(t("empty_all")) + "</div>"; return; }
+    var anyOut = rows.some(function (r) { return r.out > 0; });
+    var cols = anyOut ? 4 : 3;
+
+    $("historyBody").innerHTML =
+      '<table class="stmt"><thead><tr>' +
+        "<th>" + esc(t("month")) + "</th><th>" + esc(t("txns")) + "</th>" +
+        "<th>" + esc(t("spent")) + "</th>" +
+        (anyOut ? "<th>" + esc(t("outstanding")) + "</th>" : "") +
+      "</tr></thead><tbody>" +
+      rows.map(function (r) {
+        var open = !!openMonths[r.m];
+        var head =
+          '<tr class="mrow' + (open ? " open" : "") + '" data-month="' + esc(r.m) + '"' +
+            ' role="button" tabindex="0" aria-expanded="' + (open ? "true" : "false") + '">' +
+            '<td><span class="caret">›</span>' + esc(r.m) + "</td>" +
+            '<td class="n">' + esc(String(r.n)) + "</td>" +
+            "<td>" + esc(money0(r.spent)) + "</td>" +
+            (anyOut ? '<td class="' + (r.out ? "out" : "zero") + '">' +
+              (r.out ? esc(money0(r.out)) : "–") + "</td>" : "") +
+          "</tr>";
+        if (!open) return head;
+        // due date ascending within the month — reads like a statement
+        var items = r.items.slice().sort(function (a, b) {
+          return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+        });
+        return head +
+          '<tr class="drow"><td colspan="' + cols + '">' +
+            '<div class="detail">' + listHtml(items) + "</div>" +
+          "</td></tr>";
+      }).join("") + "</tbody></table>";
+  }
+
+  // ---- tab 3: stats ----
+  // Spend = paid, excluding borrow (she fronted that; repaying is not household
+  // spending), bucketed by DUE month so this agrees with the statement tab.
+  function lastMonths(n) {
+    var out = [], d = new Date(), y = d.getFullYear(), m = d.getMonth();
+    for (var i = n - 1; i >= 0; i--) {
+      var dt = new Date(y, m - i, 1);
+      out.push(dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0"));
+    }
+    return out;
+  }
+  function spendRows() {
+    return expenses.filter(function (e) { return e.paid && !isBorrow(e); });
+  }
+
+  function barsSvg(series) {          // [{label, value, now}]
+    var W = 320, H = 96, padB = 16, gap = 3;
+    var max = Math.max.apply(null, series.map(function (s) { return s.value; }).concat([1]));
+    var bw = (W - gap * (series.length - 1)) / series.length;
+    var top = series.reduce(function (a, s, i) { return s.value > series[a].value ? i : a; }, 0);
+    var body = series.map(function (s, i) {
+      var h = Math.max(s.value > 0 ? 2 : 0, Math.round((s.value / max) * (H - padB - 14)));
+      var x = i * (bw + gap), y = H - padB - h;
+      var label = (i === top || s.now) && s.value > 0
+        ? '<text class="val" x="' + (x + bw / 2) + '" y="' + (y - 4) +
+          '" text-anchor="middle">' + esc(money0(s.value)) + "</text>"
+        : "";
+      // 4px rounded data-end, anchored to the baseline
+      return '<rect class="bar" x="' + x + '" y="' + y + '" width="' + bw +
+        '" height="' + h + '" rx="' + Math.min(4, bw / 2) + '"' +
+        (s.now ? "" : ' opacity="' + (s.value ? 0.85 : 0.25) + '"') + "></rect>" + label +
+        '<text x="' + (x + bw / 2) + '" y="' + (H - 4) + '" text-anchor="middle">' +
+        esc(s.label) + "</text>";
     }).join("");
-    $("empty").style.display = shown.length ? "none" : "block";
+    return '<svg viewBox="0 0 ' + W + " " + H + '" role="img">' +
+      '<line class="base" x1="0" y1="' + (H - padB + 0.5) + '" x2="' + W +
+      '" y2="' + (H - padB + 0.5) + '"></line>' + body + "</svg>";
+  }
+
+  function hbarsSvg(rows) {           // [{name, value}]
+    var W = 320, rowH = 26, labelW = 96, valW = 62;
+    var H = rows.length * rowH;
+    var max = Math.max.apply(null, rows.map(function (r) { return r.value; }).concat([1]));
+    var track = W - labelW - valW;
+    var body = rows.map(function (r, i) {
+      var y = i * rowH, w = Math.max(2, Math.round((r.value / max) * track));
+      return '<text class="name" x="0" y="' + (y + rowH / 2 + 3) + '">' + esc(r.name) + "</text>" +
+        '<rect class="bar" x="' + labelW + '" y="' + (y + 5) + '" width="' + w +
+        '" height="' + (rowH - 12) + '" rx="3"></rect>' +
+        '<text class="val" x="' + W + '" y="' + (y + rowH / 2 + 3) +
+        '" text-anchor="end">' + esc(money0(r.value)) + "</text>";
+    }).join("");
+    return '<svg viewBox="0 0 ' + W + " " + H + '" role="img">' + body + "</svg>";
+  }
+
+  function renderStats() {
+    var rows = spendRows();
+    if (!rows.length && !expenses.length) {
+      $("statsBody").innerHTML = '<div class="empty">' + esc(t("empty_all")) + "</div>";
+      return;
+    }
+    var months = lastMonths(12), thisMonth = todayStr().slice(0, 7);
+    var byMonth = {};
+    months.forEach(function (m) { byMonth[m] = 0; });
+    rows.forEach(function (e) {
+      var m = (e.date || "").slice(0, 7);
+      if (m in byMonth) byMonth[m] += Number(e.amount || 0);
+    });
+
+    // average over months that have actually happened and have spend
+    var past = months.filter(function (m) { return m < thisMonth && byMonth[m] > 0; });
+    var avg = past.length
+      ? past.reduce(function (a, m) { return a + byMonth[m]; }, 0) / past.length : 0;
+
+    var inWindow = rows.filter(function (e) { return months.indexOf((e.date || "").slice(0,7)) >= 0; });
+    var sumWhere = function (pred) {
+      return inWindow.filter(pred).reduce(function (a, e) { return a + Number(e.amount || 0); }, 0);
+    };
+    var aden = sumWhere(function (e) { return (e.category || "").indexOf("aden-") === 0; });
+    var living = sumWhere(function (e) { return e.category === "living"; });
+
+    var kpi =
+      '<div class="kpi">' +
+        '<div class="t"><div class="k">' + esc(t("kpi_avg")) + '</div><div class="v">' +
+          esc(money0(avg)) + '</div><div class="s">' + esc(String(past.length) + t("kpi_mo")) + "</div></div>" +
+        '<div class="t"><div class="k">' + esc(t("kpi_this")) + '</div><div class="v">' +
+          esc(money0(byMonth[thisMonth] || 0)) + '</div><div class="s">' + esc(thisMonth) + "</div></div>" +
+        '<div class="t"><div class="k">' + esc(t("kpi_living")) + '</div><div class="v">' +
+          esc(money0(living)) + '</div><div class="s">' + esc(t("kpi_12mo")) + "</div></div>" +
+        '<div class="t"><div class="k">' + esc(t("kpi_aden")) + '</div><div class="v">' +
+          esc(money0(aden)) + '</div><div class="s">' + esc(t("kpi_12mo")) + "</div></div>" +
+      "</div>";
+
+    var series = months.map(function (m) {
+      return { label:m.slice(5), value:byMonth[m], now:m === thisMonth };
+    });
+
+    // categories, largest first, tail folded into "other" — never more hues
+    var byCat = {};
+    inWindow.forEach(function (e) {
+      var c = e.category || "other";
+      byCat[c] = (byCat[c] || 0) + Number(e.amount || 0);
+    });
+    var cats = Object.keys(byCat).map(function (c) {
+      return { name: (STR[lang].cat[c] || c), value: byCat[c] };
+    }).sort(function (a, b) { return b.value - a.value; });
+    if (cats.length > 8) {
+      var tail = cats.slice(7).reduce(function (a, r) { return a + r.value; }, 0);
+      cats = cats.slice(0, 7).concat([{ name:STR[lang].cat.other, value:tail }]);
+    }
+
+    $("statsBody").innerHTML =
+      '<div class="viz">' + kpi +
+      '<div class="chart"><h3>' + esc(t("ch_monthly")) + "</h3>" +
+        '<div class="cap">' + esc(t("ch_monthly_cap")) + "</div>" +
+        barsSvg(series) + "</div>" +
+      (cats.length ?
+      '<div class="chart"><h3>' + esc(t("ch_cat")) + "</h3>" +
+        '<div class="cap">' + esc(t("ch_cat_cap")) + "</div>" +
+        hbarsSvg(cats) + "</div>" : "") +
+      borrowBlock(months) +
+      "</div>";
+  }
+
+  // ---- what I've fronted, and whether it comes back ----
+  function borrowBlock(months) {
+    var all = expenses.filter(isBorrow);
+    if (!all.length) return "";
+    var inWindow = all.filter(function (e) { return months.indexOf((e.date || "").slice(0,7)) >= 0; });
+    var sum = function (rows) {
+      return rows.reduce(function (a, e) { return a + Number(e.amount || 0); }, 0);
+    };
+    var outstanding = all.filter(function (e) { return !e.paid; });
+    var repaid = inWindow.filter(function (e) { return e.paid && e.paid_date; });
+
+    // how long repayment actually takes — fronted date → repaid date
+    var waits = repaid.map(function (e) { return daysBetween(e.date, e.paid_date); })
+                      .filter(function (d) { return d >= 0; });
+    var avgWait = waits.length
+      ? Math.round(waits.reduce(function (a, d) { return a + d; }, 0) / waits.length) : null;
+    // how long the oldest unpaid one has been sitting
+    var oldest = outstanding.reduce(function (a, e) {
+      var d = daysBetween(e.date, todayStr());
+      return d > a ? d : a;
+    }, 0);
+
+    var tiles =
+      '<div class="t"><div class="k">' + esc(t("lent")) + '</div><div class="v">' +
+        esc(money0(sum(outstanding))) + '</div><div class="s">' +
+        esc(String(outstanding.length) + t("kpi_items")) + "</div></div>" +
+      '<div class="t"><div class="k">' + esc(t("kpi_fronted")) + '</div><div class="v">' +
+        esc(money0(sum(inWindow))) + '</div><div class="s">' + esc(t("kpi_12mo")) + "</div></div>" +
+      '<div class="t"><div class="k">' + esc(t("kpi_repaid")) + '</div><div class="v">' +
+        esc(money0(sum(repaid))) + '</div><div class="s">' +
+        esc(String(repaid.length) + t("kpi_items")) + "</div></div>" +
+      '<div class="t"><div class="k">' + esc(t("kpi_wait")) + '</div><div class="v">' +
+        (avgWait === null ? "–" : esc(String(avgWait) + t("days"))) + '</div><div class="s">' +
+        esc(outstanding.length ? t("kpi_oldest") + " " + oldest + t("days") : t("kpi_settled")) +
+        "</div></div>";
+
+    var byMonth = {};
+    months.forEach(function (m) { byMonth[m] = 0; });
+    inWindow.forEach(function (e) {
+      var m = (e.date || "").slice(0, 7);
+      if (m in byMonth) byMonth[m] += Number(e.amount || 0);
+    });
+    var thisMonth = todayStr().slice(0, 7);
+    var series = months.map(function (m) {
+      return { label:m.slice(5), value:byMonth[m], now:m === thisMonth };
+    });
+
+    return '<div class="sec"><h2>' + esc(t("sec_borrow")) + "</h2></div>" +
+      '<div class="kpi">' + tiles + "</div>" +
+      '<div class="chart"><h3>' + esc(t("ch_borrow")) + "</h3>" +
+        '<div class="cap">' + esc(t("ch_borrow_cap")) + "</div>" +
+        barsSvg(series) + "</div>";
+  }
+
+  function render() {
+    // cards live inside the "now" pane, so they only cost work when it is shown
+    if (tab === "now") { renderCards(); renderNow(); }
+    else if (tab === "history") renderHistory();
+    else renderStats();
   }
 
   function refresh() {
-    return api("list", {status: filter}).then(function (j) {
-      expenses = j.expenses;
-      $("unpaidTotal").textContent = money(j.summary.unpaid);
-      $("paidTotal").textContent = money(j.summary.paid);
+    return api("list", {status:"all"}).then(function (j) {
+      expenses = j.expenses || [];
+      summary = j.summary || {};
       render();
     }).catch(function (e) { toast(e.message); });
   }
-
-  // ---- filter chips ----
-  function paintChips() {
-    Array.prototype.forEach.call(document.querySelectorAll("#chips .chip"), function (el) {
-      el.classList.toggle("on", el.getAttribute("data-f") === filter);
-    });
-  }
-  $("chips").addEventListener("click", function (ev) {
-    var f = ev.target.getAttribute && ev.target.getAttribute("data-f");
-    if (!f) return;
-    filter = f; paintChips(); refresh();
-  });
 
   // ---- add ----
   $("addForm").addEventListener("submit", function (ev) {
     ev.preventDefault();
     api("submit", {
-      date: $("date").value || today(),
+      date: $("date").value || todayStr(),
       amount: parseFloat($("amount").value),
       category: $("category").value,
       description: $("desc").value.trim() || null,
-      submitted_by: who(),
     }).then(function () {
-      if (who()) localStorage.setItem("fe.name", who());
       $("amount").value = ""; $("desc").value = "";
+      $("addWrap").open = false;
       toast(t("added")); refresh();
     }).catch(function (e) { toast(e.message); });
   });
 
   // ---- per-item actions ----
-  $("list").addEventListener("click", function (ev) {
+  document.addEventListener("click", function (ev) {
     var btn = ev.target.closest ? ev.target.closest("button[data-act]") : null;
     if (!btn) return;
     var itemEl = btn.closest(".item");
@@ -276,19 +768,19 @@
 
     if (act === "pay") {
       if (exp.paid) {
-        api("mark-paid", {id:id, paid:false, changed_by:who()})
+        api("mark-paid", {id:id, paid:false})
           .then(function () { toast(t("unmarked")); refresh(); })
           .catch(function (e) { toast(e.message); });
       } else {
-        var d = prompt(t("paid_on"), today());
+        var d = prompt(t("paid_on"), todayStr());
         if (d === null) return;
-        api("mark-paid", {id:id, paid:true, paid_date:d.trim(), changed_by:who()})
+        api("mark-paid", {id:id, paid:true, paid_date:d.trim()})
           .then(function () { toast(t("marked")); refresh(); })
           .catch(function (e) { toast(e.message); });
       }
     } else if (act === "del") {
       if (!confirm(t("confirm_del"))) return;
-      api("delete", {id:id, changed_by:who()})
+      api("delete", {id:id})
         .then(function () { toast(t("deleted")); refresh(); })
         .catch(function (e) { toast(e.message); });
     } else if (act === "edit") {
@@ -296,20 +788,25 @@
       if (box.style.display !== "none") { box.style.display = "none"; return; }
       box.style.display = "block";
       box.innerHTML =
-        '<label>' + t("amount") + '</label><input type="number" step="0.01" min="0.01" class="e-amt" value="' + exp.amount + '">' +
-        '<label>' + t("desc") + '</label><input type="text" class="e-desc" value="' + esc(exp.description || "") + '">' +
-        '<div class="row"><div><label>' + t("date") + '</label><input type="date" class="e-date" value="' + esc(exp.date) + '"></div>' +
-        '<div><label>' + t("category") + '</label><select class="e-cat">' +
-          CATS.map(function (c) { return '<option value="' + c + '"' + (exp.category === c ? " selected" : "") + ">" + esc(STR[lang].cat[c]) + "</option>"; }).join("") +
-        "</select></div></div>" +
-        '<div class="btns"><button class="pay" data-e="save">' + t("save") + '</button>' +
-        '<button data-e="cancel">' + t("cancel") + "</button></div>";
+        '<div class="row"><div><label>' + esc(t("amount")) + '</label>' +
+          '<input type="number" step="0.01" min="0.01" class="e-amt" value="' + esc(exp.amount) + '"></div>' +
+        '<div><label>' + esc(t("due")) + '</label>' +
+          '<input type="date" class="e-date" value="' + esc(exp.date) + '"></div></div>' +
+        '<label>' + esc(t("desc")) + '</label>' +
+          '<input type="text" class="e-desc" value="' + esc(exp.description || "") + '">' +
+        '<label>' + esc(t("category")) + '</label><select class="e-cat">' +
+          CATS.map(function (c) {
+            return '<option value="' + esc(c) + '"' + (exp.category === c ? " selected" : "") + ">" +
+              esc(STR[lang].cat[c] || c) + "</option>"; }).join("") +
+        "</select>" +
+        '<div class="btns" style="margin-top:10px"><button class="pay" data-e="save">' + esc(t("save")) +
+        '</button><button data-e="cancel">' + esc(t("cancel")) + "</button></div>";
       box.onclick = function (ev2) {
         var b2 = ev2.target.closest ? ev2.target.closest("button[data-e]") : null;
         if (!b2) return;
-        ev2.stopPropagation();
+        ev2.stopPropagation(); ev2.preventDefault();
         if (b2.getAttribute("data-e") === "cancel") { box.style.display = "none"; return; }
-        api("update", {id:id, changed_by:who(), fields:{
+        api("update", {id:id, fields:{
           amount: parseFloat(box.querySelector(".e-amt").value),
           description: box.querySelector(".e-desc").value.trim() || null,
           date: box.querySelector(".e-date").value,
@@ -322,20 +819,18 @@
       if (hbox.style.display !== "none") { hbox.style.display = "none"; return; }
       api("history", {id:id}).then(function (j) {
         hbox.style.display = "block";
-        hbox.innerHTML = j.history.map(function (h) {
-          return '<div class="hist">' + esc(h.changed_at.replace("T", " ")) + " · " +
+        hbox.innerHTML = (j.history || []).map(function (h) {
+          return '<div class="hist">' + esc(String(h.changed_at).replace("T", " ")) + " · " +
             esc(STR[lang].act[h.action] || h.action) +
             (h.changed_by ? " · " + esc(h.changed_by) : "") +
-            " · " + money(h.snapshot.amount) + "</div>";
+            " · " + esc(money(h.snapshot && h.snapshot.amount)) + "</div>";
         }).join("") || '<div class="hist">–</div>';
       }).catch(function (e) { toast(e.message); });
     }
   });
 
   // ---- init ----
-  $("date").value = today();
-  $("who").value = localStorage.getItem("fe.name") || "";
-  paintChips();
+  $("date").value = todayStr();
   applyLang();
   refresh();
 })();
