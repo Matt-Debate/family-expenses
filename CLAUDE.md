@@ -30,7 +30,7 @@ annotations. Server `instructions` is bonus, never the only home of a rule.
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 77 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 98 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link
 DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post-deploy
@@ -43,7 +43,7 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 | `app/store.py` | ALL reads/writes; every mutation writes an `expense_history` row in the same transaction; token mint/validate/revoke |
 | `app/db.py` | portable layer: Postgres (`DATABASE_URL`) / sqlite (tests, shared locked conn); `:name` params both drivers |
 | `app/web.py` + `api.py` + `portal.html` | `/t/<token>` bilingual portal + `POST /api/*` (token revalidated every request) |
-| `app/mcp_server.py` | 9 tools + 记账/对账/修复 persona prompts + optional bearer middleware |
+| `app/mcp_server.py` | 10 tools + 记账/对账/修复 persona prompts + optional bearer middleware |
 | `app/main.py` | one service: portal + API + `/mcp`; env: `DATABASE_URL`, `APP_TZ` (Asia/Shanghai), `MCP_SECRET` (leave unset), `PORT` |
 | `db/schema.sql` | portable DDL, applied idempotently at startup; **first breaking change must start dated migration files** |
 | `docs/` | contract · MCP design · runbook · changelog (semver — entry with every behavior change) |
@@ -57,14 +57,21 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 - Timestamps are app-managed UTC ISO text; "today" defaults use `APP_TZ`.
 - Development branch: `claude/family-expenses-setup-8uvrks`.
 
-## Current state (2026-08-10)
+## Current state (2026-08-11)
 
-**v0.4.5 is deployed and verified** (revision `family-expenses-00005-5tz`). It
+**v0.5.0 is committed, NOT deployed.** Adds `expenses_list_links` (10th tool)
+and optional portal OAuth (Auth0 Universal Login, `app/auth.py`). OAuth is
+**off** until `AUTH0_DOMAIN`/`AUTH0_CLIENT_ID`/`AUTH0_CLIENT_SECRET`/
+`SESSION_SECRET` are all set, so deploying it changes nothing by itself.
+Turning it on needs an Auth0 Regular Web Application (tenant
+`work-os.jp.auth0.com`) plus `PORTAL_ALLOWED_EMAILS` — see `docs/RUNBOOK.md` §8.
+
+**v0.4.5 is what is live and verified** (revision `family-expenses-00005-5tz`). It
 fixed a stored XSS in the portal — an unescaped category label reaching
 `innerHTML` which, combined with the unauthenticated `/mcp`, let any caller who
 knew the URL plant markup that exfiltrates her portal token. Live smoke passed
 and A8 was re-verified across the revision change: same URL, `/mcp` still
-header-free, `MCP_SECRET` still unset. The suite is 77 tests.
+header-free, `MCP_SECRET` still unset. The suite is 98 tests.
 
 **Nothing blocks human onboarding now** — Wave 6 in `docs/FIRST_DEPLOY_PLAN.md`
 is cleared and waiting on the five human steps.

@@ -14,6 +14,41 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: health + portal routes OK.
 
+## [0.5.0] — 2026-08-11
+
+### Added
+- **`expenses_list_links` (10th tool).** Found by live testing: revocation was
+  unreachable in practice. The agent had no way to discover *what* to revoke,
+  and `expenses_revoke_link`'s description pointed it at the operator CLI — a
+  channel an agent cannot use. A cross-reference is only guidance if it names a
+  tool the agent can actually call. Returns id, label, status
+  (active/expired/revoked), and usage; hides revoked links unless
+  `include_revoked=true`.
+- **Portal OAuth via Auth0 Universal Login (`app/auth.py`), off by default.**
+  Same tenant as work-dashboards (JP region). Deliberate divergence from that
+  app's `@auth0/auth0-spa-js` SPA pattern: this portal has no build step and a
+  CDN script tag is an unreliable dependency from mainland China, so the code
+  exchange is server-side and the session is a signed httpOnly cookie.
+  - Layered *on top of* `/t/<token>`, not replacing it: the token still says
+    which ledger, Auth0 says who you are. No tool or table was retired.
+  - `PORTAL_ALLOWED_EMAILS` allowlist. Auth0 authenticates anyone who can sign
+    up, so an empty list denies everyone — a half-finished config fails closed.
+  - New routes `/login`, `/callback`, `/logout` exist **only** when configured.
+  - `/mcp` untouched; `MCP_SECRET` still unset. Connected MCP clients see no
+    login and need no reconfiguration.
+
+### Compatibility
+- With `AUTH0_*` / `SESSION_SECRET` unset, behavior is identical to 0.4.5 —
+  pinned by `test_everything_still_open_when_oauth_is_off` and by the route-shape
+  test asserting `/t/{token}` and `/api/*` do not move when OAuth is on.
+
+### Tests
+- Suite 77 → **98**: link-listing behavior and its ergonomics pins, plus
+  `tests/test_auth.py` covering the flag (partial config fails closed), the
+  allowlist (case-insensitive, empty = deny), the guards (portal 302, API 401,
+  bad token still 404s without a login detour), and open-redirect protection on
+  `?next=`.
+
 ## [0.4.5] — 2026-08-10
 
 ### Operations

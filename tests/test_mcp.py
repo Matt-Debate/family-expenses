@@ -23,7 +23,7 @@ from app.store import Store  # noqa: E402
 EXPECTED_TOOLS = {
     "expenses_help", "expenses_list", "expenses_add", "expenses_mark_paid",
     "expenses_update", "expenses_delete", "expenses_history",
-    "expenses_mint_link", "expenses_revoke_link",
+    "expenses_mint_link", "expenses_revoke_link", "expenses_list_links",
 }
 
 _TEST_LOOP = asyncio.new_event_loop()
@@ -92,6 +92,56 @@ class McpToolTests(unittest.TestCase):
         })))
         self.assertTrue(revoked["revoked"])
         self.assertIsNone(self.store.validate_token(minted["token"]))
+
+    def test_list_links_shows_ids_and_usage_but_never_tokens(self):
+        minted = tool_payload(run(self.mcp.call_tool("expenses_mint_link", {
+            "label": "wife",
+        })))
+        result = tool_payload(run(self.mcp.call_tool("expenses_list_links", {})))
+        self.assertEqual(len(result["links"]), 1)
+        link = result["links"][0]
+        self.assertEqual(link["label"], "wife")
+        self.assertEqual(link["status"], "active")
+        self.assertEqual(link["expires_at"], "never")
+        self.assertEqual(link["last_used_at"], "never opened")
+
+        # The whole point: an id you can revoke with, and no token anywhere.
+        self.assertEqual(link["id"], self.store.list_tokens()[0]["id"])
+        self.assertNotIn(minted["token"], json.dumps(result))
+
+    def test_list_links_id_round_trips_into_revoke(self):
+        """The gap this tool closes: revoking without the operator holding a token."""
+        minted = tool_payload(run(self.mcp.call_tool("expenses_mint_link", {
+            "label": "wife",
+        })))
+        listed = tool_payload(run(self.mcp.call_tool("expenses_list_links", {})))
+        revoked = tool_payload(run(self.mcp.call_tool("expenses_revoke_link", {
+            "token_or_id": listed["links"][0]["id"],
+        })))
+        self.assertTrue(revoked["revoked"])
+        self.assertIsNone(self.store.validate_token(minted["token"]))
+
+    def test_list_links_hides_revoked_unless_asked(self):
+        minted = tool_payload(run(self.mcp.call_tool("expenses_mint_link", {
+            "label": "old-phone",
+        })))
+        run(self.mcp.call_tool("expenses_revoke_link", {"token_or_id": minted["token"]}))
+
+        default = tool_payload(run(self.mcp.call_tool("expenses_list_links", {})))
+        self.assertEqual(default["links"], [])
+
+        widened = tool_payload(run(self.mcp.call_tool("expenses_list_links", {
+            "include_revoked": True,
+        })))
+        self.assertEqual([x["status"] for x in widened["links"]], ["revoked"])
+
+    def test_list_links_marks_expired_separately_from_revoked(self):
+        self.store.mint_token(label="stale", expires_days=1)
+        with self.store.db.tx() as tx:  # age it past expiry without touching revoked
+            tx.execute("UPDATE access_tokens SET expires_at = :e",
+                       {"e": "2000-01-01T00:00:00Z"})
+        listed = tool_payload(run(self.mcp.call_tool("expenses_list_links", {})))
+        self.assertEqual([x["status"] for x in listed["links"]], ["expired"])
 
     def test_validation_errors_propagate(self):
         from mcp.server.fastmcp.exceptions import ToolError
@@ -182,12 +232,25 @@ class AgentErgonomicsTests(unittest.TestCase):
             self.assertIn(anchor, text)
 
     def test_descriptions_carry_bilingual_triggers(self):
-        tools = {t.name: t for t in run(self.mcp.list_tools())}
-        self.assertIn("付了", tools["expenses_mark_paid"].description)
-        self.assertIn("paid", tools["expenses_mark_paid"].description)
-        self.assertIn("300块", tools["expenses_add"].description)
-        self.assertIn("expenses_update", tools["expenses_add"].description)  # cross-ref
-        self.assertIn("expenses_mark_paid", tools["expenses_delete"].description)
+        # Whitespace-normalized: docstrings wrap, and a trigger phrase split
+        # across a line break still reads fine to the agent. Assert on meaning,
+        # not on where the source happens to break.
+        desc = {
+            t.name: " ".join((t.description or "").split())
+            for t in run(self.mcp.list_tools())
+        }
+        self.assertIn("付了", desc["expenses_mark_paid"])
+        self.assertIn("paid", desc["expenses_mark_paid"])
+        self.assertIn("300块", desc["expenses_add"])
+        self.assertIn("expenses_update", desc["expenses_add"])  # cross-ref
+        self.assertIn("expenses_mark_paid", desc["expenses_delete"])
+        # link tools must point at each other, not at a CLI the agent cannot run
+        self.assertIn("谁有链接", desc["expenses_list_links"])
+        self.assertIn("list the links", desc["expenses_list_links"])
+        self.assertIn("expenses_revoke_link", desc["expenses_list_links"])
+        self.assertIn("expenses_mint_link", desc["expenses_list_links"])
+        self.assertIn("expenses_list_links", desc["expenses_revoke_link"])
+        self.assertNotIn("CLI", desc["expenses_revoke_link"])
 
     def test_annotations_read_vs_destructive(self):
         tools = {t.name: t for t in run(self.mcp.list_tools())}
@@ -195,6 +258,8 @@ class AgentErgonomicsTests(unittest.TestCase):
         self.assertTrue(tools["expenses_help"].annotations.readOnlyHint)
         self.assertTrue(tools["expenses_delete"].annotations.destructiveHint)
         self.assertFalse(tools["expenses_add"].annotations.readOnlyHint)
+        self.assertTrue(tools["expenses_list_links"].annotations.readOnlyHint)
+        self.assertTrue(tools["expenses_revoke_link"].annotations.destructiveHint)
 
     def test_personas_registered(self):
         prompts = {p.name for p in run(self.mcp.list_prompts())}

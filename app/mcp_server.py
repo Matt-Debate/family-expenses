@@ -30,7 +30,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .store import Store, ValidationError, today_str
+from .store import Store, ValidationError, _utc_now_iso, today_str
 
 _READ = ToolAnnotations(readOnlyHint=True)
 _WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
@@ -53,6 +53,7 @@ INTENT → TOOL:
 - "这个月花了多少 / totals" → expenses_list() and read .summary
 - "这条是谁改的 / what happened to X" → expenses_history
 - "给我老婆做个链接" → expenses_mint_link(label="wife") — link never expires
+- "哪些链接还在用 / who has a link / list the links" → expenses_list_links
 
 RULES OF THUMB:
 - Dates/paid dates: omit them — the server defaults to today in China time.
@@ -255,6 +256,43 @@ def build_mcp(store: Store) -> FastMCP:
                 "note": _summary_note()}
 
     # ── link management ───────────────────────────────────────────────────
+    @mcp.tool(annotations=_READ)
+    def expenses_list_links(include_revoked: bool = False) -> dict[str, Any]:
+        """List the portal links that exist and how they are being used. Use
+        for: '谁有链接/哪些链接还在用/有几个链接', 'who has a link', 'list the
+        links', and ALWAYS before revoking, so you know which one to kill.
+        Returns each link's id, label and usage — NOT the token itself, so
+        nothing permanent leaks into the chat. Pass an id straight to
+        expenses_revoke_link. To create a link use expenses_mint_link."""
+        rows = store.list_tokens()
+        links = []
+        for r in rows:
+            if r["revoked"]:
+                status = "revoked"
+            elif r["expires_at"] and str(r["expires_at"]) <= _utc_now_iso():
+                status = "expired"
+            else:
+                status = "active"
+            if status == "revoked" and not include_revoked:
+                continue
+            links.append({
+                "id": r["id"], "label": r["label"], "status": status,
+                "expires_at": r["expires_at"] or "never",
+                "use_count": r["use_count"],
+                "last_used_at": r["last_used_at"] or "never opened",
+                "created_at": r["created_at"],
+            })
+        active = sum(1 for x in links if x["status"] == "active")
+        return {
+            "links": links,
+            "note": (
+                f"{active} active link(s). Token values are never listed — "
+                "revoke with expenses_revoke_link(token_or_id=<the id above>). "
+                + ("Revoked links hidden; pass include_revoked=true to see them."
+                   if not include_revoked else "")
+            ),
+        }
+
     @mcp.tool(annotations=_WRITE)
     def expenses_mint_link(
         label: Optional[str] = None, expires_days: Optional[int] = None
@@ -267,7 +305,9 @@ def build_mcp(store: Store) -> FastMCP:
     @mcp.tool(annotations=_DESTRUCTIVE)
     def expenses_revoke_link(token_or_id: str) -> dict[str, Any]:
         """Kill a portal link (lost phone, leaked URL). Takes the token or its
-        id — see them via the operator CLI or the mint result."""
+        id — call expenses_list_links first to see the ids. Revoking is
+        permanent and the family member loses access immediately, so confirm
+        with the user which link before calling."""
         return {"revoked": store.revoke_token(token_or_id)}
 
     # ── personas (MCP prompts — user-invocable in clients that show them) ─

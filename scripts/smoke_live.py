@@ -88,6 +88,7 @@ async def exercise_public_mcp(base: str) -> None:
                 "expenses_help", "expenses_list", "expenses_add",
                 "expenses_mark_paid", "expenses_update", "expenses_delete",
                 "expenses_history", "expenses_mint_link", "expenses_revoke_link",
+                "expenses_list_links",
             }
             assert {tool.name for tool in tools.tools} == expected_tools
             assert {prompt.name for prompt in prompts.prompts} == {
@@ -214,7 +215,7 @@ def main() -> int:
         print("4. Public MCP client + bilingual conversational flow")
         try:
             asyncio.run(exercise_public_mcp(base))
-            check("initialize, 9 tools, 3 prompts, bilingual writes/reads/cleanup", True)
+            check("initialize, 10 tools, 3 prompts, bilingual writes/reads/cleanup", True)
         except Exception as exc:
             check("public MCP gate", False, f"{type(exc).__name__}: {exc}")
     finally:

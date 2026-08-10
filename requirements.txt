@@ -5,3 +5,11 @@ starlette>=0.40
 uvicorn>=0.30
 psycopg[binary]>=3.1
 tzdata>=2024.1  # zoneinfo data for APP_TZ "today" defaults on slim images
+
+# Portal OAuth (Auth0 Universal Login). Inert unless AUTH0_* env vars are set —
+# see app/auth.py. Mirrors work-dashboards' Auth0 tenant, but server-side
+# session instead of the SPA library: this portal has no build step, and a CDN
+# script tag is an unreliable dependency from mainland China.
+authlib>=1.3,<2
+itsdangerous>=2.1      # signs the Starlette session cookie
+httpx>=0.27            # Authlib's HTTP client for the token exchange

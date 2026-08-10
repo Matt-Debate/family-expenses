@@ -19,7 +19,7 @@ edit lands where it has effect.
 
 **Rule: if a behavior matters, it must be encoded in the top four rows.**
 
-## Tool inventory (9) and why
+## Tool inventory (10) and why
 
 | tool | why it exists / selection cue |
 |---|---|
@@ -31,6 +31,7 @@ edit lands where it has effect.
 | `expenses_update` | corrections ("改成350"); cannot touch paid — error redirects to mark_paid |
 | `expenses_delete` | mistakes only; destructive-flagged; description says confirm first and redirects "it's paid" to mark_paid |
 | `expenses_mint_link` / `expenses_revoke_link` | link lifecycle ("给我老婆做个链接" / kill switch) |
+| `expenses_list_links` | added v0.5.0 after live testing: revoke was **unreachable in practice** — the agent had no way to discover what to revoke, and `expenses_revoke_link` pointed it at the operator CLI, a channel an agent cannot use. Returns ids + usage, never token values, so revocation works without permanent secrets entering the chat. A cross-reference is only guidance if it names a tool the agent can actually call |
 
 Principles: no two tools answer the same user intent; every mutating tool
 takes `query` (fuzzy, candidates-on-ambiguity, never guesses); every write
