@@ -263,6 +263,15 @@ Required acceptance evidence:
 
 Only after all prior gates pass:
 
+0. **BLOCKED until v0.4.5 is deployed.** The live revision (`00004-pvt`, commit
+   `4848c85`) carries a stored XSS: the portal rendered an unescaped category
+   label into `innerHTML`, and because `/mcp` is unauthenticated by design, any
+   caller who knows the service URL can plant markup that reads
+   `location.pathname` and exfiltrates her never-expiring token. Sending her the
+   link before the fix is live hands out a token that can be stolen. Deploy
+   v0.4.5 (`scripts/deploy.sh`), then run
+   `DATABASE_URL=… python3 scripts/smoke_live.py --base-url <service-url>` by
+   hand — RUNBOOK §1 does not mention the smoke script, so it is easy to skip.
 1. Mint the real never-expiring `wife` link directly against the production
    Neon database.
 2. Send it privately over WeChat, open it on her phone, bookmark it, and add it
