@@ -46,7 +46,7 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 | `app/mcp_server.py` | 10 tools + 记账/对账/修复 persona prompts + optional bearer middleware |
 | `app/main.py` | one service: portal + API + `/mcp`; env: `DATABASE_URL`, `APP_TZ` (Asia/Shanghai), `MCP_SECRET` (leave unset), `PORT` |
 | `db/schema.sql` | portable DDL, applied idempotently at startup; **first breaking change must start dated migration files** |
-| `docs/` | contract · MCP design · runbook · changelog (semver — entry with every behavior change) |
+| `docs/` | contract · MCP design · runbook · changelog (semver — entry with every behavior change) · **backlog** (deferred work + known unfixed issues) |
 
 ## Conventions
 

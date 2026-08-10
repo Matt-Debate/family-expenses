@@ -24,8 +24,9 @@ The script permanently pins service `family-expenses` in
 `asia-southeast1` (Singapore, colocated with Neon), builds and deploys the
 current clean Git SHA, and binds `DATABASE_URL` from
 `family-expenses-database-url`. Production refuses to boot on SQLite.
-Auth posture (final): links never expire, `/mcp` is open, nobody ever
-re-authenticates. `APP_TZ` (default `Asia/Shanghai`) controls what "today"
+Auth posture: links never expire and `/mcp` is open and header-free — that
+part is frozen. The PORTAL may additionally sit behind Auth0 login (§8);
+that is opt-in and does not touch `/mcp`. `APP_TZ` (default `Asia/Shanghai`) controls what "today"
 means for default dates.
 
 ### Don't break her setup (the one rule that matters)
@@ -63,7 +64,8 @@ to renew, ever.
 
 Tools: `expenses_help`, `expenses_list`, `expenses_add`, `expenses_update`,
 `expenses_mark_paid`, `expenses_delete`, `expenses_history`,
-`expenses_mint_link`, `expenses_revoke_link` (design: `docs/MCP_DESIGN.md`).
+`expenses_mint_link`, `expenses_revoke_link`, `expenses_list_links`
+(design: `docs/MCP_DESIGN.md`).
 
 **Personas** (appear as prompt templates in Claude apps; optional):
 记账 `jizhang` = dictate expenses; 对账 `duizhang` = walk the unpaid list and
@@ -111,6 +113,15 @@ assistant asks which one — nothing is guessed silently.
   The first breaking change must introduce a dated migration file — see
   `docs/IMPLEMENTATION_PLAN.md`.
 
+## 7. Local development
+
+```bash
+pip install -r requirements.txt
+python3 -m unittest discover -s tests        # 99 tests, sqlite, no server
+python3 scripts/mint_link.py --label dev     # local sqlite file
+python3 -m app.main                          # http://localhost:8080
+```
+
 ## 8. Portal OAuth (optional, off by default)
 
 The portal can sit behind Auth0 Universal Login, layered on top of `/t/<token>`
@@ -147,12 +158,6 @@ Notes that bite:
   blocked. Use an Auth0 database connection or email OTP.
 - `/mcp` is unaffected: no login, `MCP_SECRET` still unset, connectors keep
   working.
-
-## 7. Local development
-
-```bash
-pip install -r requirements.txt
-python3 -m unittest discover -s tests        # 98 tests, sqlite, no server
-python3 scripts/mint_link.py --label dev     # local sqlite file
-python3 -m app.main                          # http://localhost:8080
-```
+- The login page carries WorkOS branding because branding is tenant-level and
+  this tenant is shared with the admin app. Filed as `docs/BACKLOG.md` §1 —
+  the fix is a separate Auth0 tenant, cheapest to do before onboarding.
