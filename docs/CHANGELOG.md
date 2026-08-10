@@ -16,6 +16,14 @@ to a release entry when a chunk set ships.
 
 ## [0.4.5] — 2026-08-10
 
+### Operations
+- Deployed to the permanent service as revision `family-expenses-00005-5tz`
+  (commit `0ce5f68`), serving 100% of traffic at the unchanged public URL.
+  `scripts/smoke_live.py` PASS; A8 re-verified across `00004-pvt` → `00005-5tz`
+  (same URL, `/mcp` still header-free, `MCP_SECRET` still unset). The fix was
+  confirmed in the served HTML using a temporary token that was then revoked —
+  no real token was minted or recorded. Wave 6 human onboarding is unblocked.
+
 ### Fixed
 - **Stored XSS in the portal (security).** `render()` interpolated the category
   label into `innerHTML` unescaped whenever the category was not one of the six

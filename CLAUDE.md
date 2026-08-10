@@ -59,13 +59,17 @@ DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post
 
 ## Current state (2026-08-10)
 
-**v0.4.5 is committed but NOT deployed.** It fixes a stored XSS in the portal
-(unescaped category label reaching `innerHTML`) that, combined with the
-unauthenticated `/mcp`, let any caller who knows the URL plant markup that
-exfiltrates her portal token. Deploy it before minting or sending the real
-`wife` link. The suite is 77 tests.
+**v0.4.5 is deployed and verified** (revision `family-expenses-00005-5tz`). It
+fixed a stored XSS in the portal — an unescaped category label reaching
+`innerHTML` which, combined with the unauthenticated `/mcp`, let any caller who
+knew the URL plant markup that exfiltrates her portal token. Live smoke passed
+and A8 was re-verified across the revision change: same URL, `/mcp` still
+header-free, `MCP_SECRET` still unset. The suite is 77 tests.
 
-v0.4.4 is what is live and technically accepted. The permanent service is
+**Nothing blocks human onboarding now** — Wave 6 in `docs/FIRST_DEPLOY_PLAN.md`
+is cleared and waiting on the five human steps.
+
+The permanent service is
 `family-expenses` in `asia-southeast1`, backed by the separate Singapore Neon
 project. The public portal and MCP acceptance gates pass at
 `https://family-expenses-bejtu5m47a-as.a.run.app`; see

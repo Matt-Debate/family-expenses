@@ -1,6 +1,6 @@
 # Feature Contract — Family Expenses
 
-**Status:** ACTIVE (v0.4.5 — stored-XSS fix awaiting deploy; v0.4.4 is live)
+**Status:** ACTIVE (v0.4.5 — deployed; stored-XSS fix live, A8 re-verified)
 **Owner:** matt-debate
 **Repo:** `Matt-Debate/family-expenses`
 **Default branch:** `main`

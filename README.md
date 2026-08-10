@@ -48,7 +48,7 @@ Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
 
 ## Status
 
-**v0.4.5** — committed, **not yet deployed**: fixes a stored-XSS hole in the
-portal that must ship before the real link is sent. **v0.4.4** is what is live
-on Cloud Run + Neon, technically accepted (see `docs/CHANGELOG.md`).
-Default branch: `main`.
+**v0.4.5** — deployed and verified on Cloud Run + Neon (revision
+`family-expenses-00005-5tz`); fixes a stored-XSS hole in the portal renderer
+(see `docs/CHANGELOG.md`). Remaining work is human onboarding — Wave 6 of
+`docs/FIRST_DEPLOY_PLAN.md`. Default branch: `main`.

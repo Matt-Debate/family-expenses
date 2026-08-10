@@ -26,6 +26,28 @@ production-hardening, infrastructure, deployment, and acceptance work.
   leaves `MCP_SECRET` unset, and deploys the Git-SHA-tagged image at digest
   `sha256:83f7052cc80ded8c3e783248657a0a45079356a1de3623989ddf3f24c9f07df0`.
 
+### Security redeploy — v0.4.5, 2026-08-10
+
+- Application version 0.4.5; deployed commit
+  `0ce5f688b08cc20f88e2fff0e0a64e55855572cf`. Ships the stored-XSS fix in the
+  portal renderer (see `docs/CHANGELOG.md`); Wave 6 was blocked on it.
+- Local verification: 77 tests pass under Python 3.11 with `ResourceWarning`
+  promoted to an error.
+- Cloud Run revision `family-expenses-00005-5tz`, serving 100% of traffic at
+  the unchanged `https://family-expenses-bejtu5m47a-as.a.run.app`; image digest
+  `sha256:6961518631e0095acca4df27a9cce138b48b7c73931a9202e5346ab02bab4af6`.
+- **A8 re-verified across `00004-pvt` → `00005-5tz`:** the service name, region,
+  and public URL are unchanged, `/mcp` still answers with no authorization
+  header, and `MCP_SECRET` remains unset (revision env is `HOST`, `APP_TZ`,
+  `DATABASE_URL` only). No connected client needs reconfiguring.
+- `scripts/smoke_live.py` PASS on the new revision: schema idempotency, pooled
+  prepared-statement gate, portal serve/reject, full expense flow with the exact
+  `['create','update','mark_paid','unmark_paid']` audit trail, public MCP
+  handshake with 9 tools and 3 prompts, bilingual writes, and cleanup.
+- Fix confirmed in the *served* HTML via a temporary token (minted, checked,
+  revoked): `esc(catLabel)` present, the `|| catLabel ||` and `|| t("cat")`
+  forms gone. No real token was minted or recorded.
+
 ## Locked production choices
 
 These choices become hard to change after onboarding and must be reviewed once
@@ -263,15 +285,11 @@ Required acceptance evidence:
 
 Only after all prior gates pass:
 
-0. **BLOCKED until v0.4.5 is deployed.** The live revision (`00004-pvt`, commit
-   `4848c85`) carries a stored XSS: the portal rendered an unescaped category
-   label into `innerHTML`, and because `/mcp` is unauthenticated by design, any
-   caller who knows the service URL can plant markup that reads
-   `location.pathname` and exfiltrates her never-expiring token. Sending her the
-   link before the fix is live hands out a token that can be stolen. Deploy
-   v0.4.5 (`scripts/deploy.sh`), then run
-   `DATABASE_URL=… python3 scripts/smoke_live.py --base-url <service-url>` by
-   hand — RUNBOOK §1 does not mention the smoke script, so it is easy to skip.
+0. ~~**BLOCKED until v0.4.5 is deployed.**~~ **CLEARED 2026-08-10.** The stored
+   XSS is fixed and live on revision `00005-5tz`; smoke passed and the fix was
+   confirmed in the served HTML (see the security-redeploy record above). Steps
+   1–5 below are now unblocked. Note for future redeploys: RUNBOOK §1 does not
+   mention `scripts/smoke_live.py`, so run it by hand after every deploy.
 1. Mint the real never-expiring `wife` link directly against the production
    Neon database.
 2. Send it privately over WeChat, open it on her phone, bookmark it, and add it
