@@ -45,7 +45,15 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertIn("PORTAL_BASE_URL=", output)
         # the allowlist must never ship empty-but-present: that is the open-door
         # config, and it is far easier to introduce here than to notice later
-        self.assertRegex(output, r"PORTAL_ALLOWED_EMAILS=[^,\"\s]+@")
+        self.assertRegex(output, r"PORTAL_ALLOWED_EMAILS=[^~\"\s]+@")
+        # A multi-email allowlist contains commas, and --set-env-vars is
+        # comma-delimited by default — gcloud would silently read the second
+        # address as a whole new env var. The ^~^ prefix rebinds the delimiter.
+        # --dry-run prints commands printf %q-escaped, so drop the backslashes
+        # before matching: the escaping is display-only, not part of the argv.
+        unescaped = output.replace("\\", "")
+        self.assertIn("--set-env-vars=^~^", unescaped)
+        self.assertIn("PORTAL_ALLOWED_EMAILS=matthewfarm@gmail.com,", unescaped)
         # A8: enabling portal login must not drag the MCP behind a header
         self.assertNotIn("MCP_SECRET", output)
 

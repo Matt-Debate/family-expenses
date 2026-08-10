@@ -46,7 +46,7 @@ AUTH0_DOMAIN="${AUTH0_DOMAIN:-work-os.jp.auth0.com}"
 AUTH0_CLIENT_ID="${AUTH0_CLIENT_ID:-EA00YyDGHHz7ATEguoAIWmSq6xD8iOES}"
 AUTH0_SECRET="${AUTH0_SECRET:-family-expenses-auth0-client-secret}"
 SESSION_SECRET_NAME="${SESSION_SECRET_NAME:-family-expenses-session-secret}"
-PORTAL_ALLOWED_EMAILS="${PORTAL_ALLOWED_EMAILS:-matthewfarm@gmail.com}"
+PORTAL_ALLOWED_EMAILS="${PORTAL_ALLOWED_EMAILS:-matthewfarm@gmail.com,matthewfarm@icloud.com}"
 PORTAL_BASE_URL="${PORTAL_BASE_URL:-https://family-expenses-bejtu5m47a-as.a.run.app}"
 
 run gcloud builds submit . \
@@ -62,7 +62,7 @@ run gcloud run deploy "$SERVICE" \
   --allow-unauthenticated \
   --min-instances=0 \
   --max-instances=3 \
-  --set-env-vars="HOST=0.0.0.0,APP_TZ=Asia/Shanghai,AUTH0_DOMAIN=${AUTH0_DOMAIN},AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID},PORTAL_ALLOWED_EMAILS=${PORTAL_ALLOWED_EMAILS},PORTAL_BASE_URL=${PORTAL_BASE_URL}" \
+  --set-env-vars="^~^HOST=0.0.0.0~APP_TZ=Asia/Shanghai~AUTH0_DOMAIN=${AUTH0_DOMAIN}~AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}~PORTAL_ALLOWED_EMAILS=${PORTAL_ALLOWED_EMAILS}~PORTAL_BASE_URL=${PORTAL_BASE_URL}" \
   --set-secrets="DATABASE_URL=${SECRET}:latest,AUTH0_CLIENT_SECRET=${AUTH0_SECRET}:latest,SESSION_SECRET=${SESSION_SECRET_NAME}:latest" \
   --quiet
 
