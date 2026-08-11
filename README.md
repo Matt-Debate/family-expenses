@@ -38,7 +38,7 @@ Built to replace free-text WeChat messages — not a business system.
 
 ```bash
 pip install -r requirements.txt
-python3 -m unittest discover -s tests        # 124 tests, sqlite, no DB server
+python3 -m unittest discover -s tests        # 126 tests, sqlite, no DB server
 python3 -m app.main                          # http://localhost:8080
 python3 scripts/mint_link.py --label wife --base-url http://localhost:8080
 ```
@@ -48,7 +48,8 @@ Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
 
 ## Status
 
-**v0.4.5** — deployed and verified on Cloud Run + Neon (revision
-`family-expenses-00005-5tz`); fixes a stored-XSS hole in the portal renderer
-(see `docs/CHANGELOG.md`). Remaining work is human onboarding — Wave 6 of
-`docs/FIRST_DEPLOY_PLAN.md`. Default branch: `main`.
+**v0.8.1** — deployed on Cloud Run + Neon (revision `family-expenses-00011-j96`)
+and **in daily household use since 2026-08-11**. Three-tab portal behind Auth0
+login, 10-tool MCP open and header-free. Version history in
+`docs/CHANGELOG.md`; known deferred issues in `docs/BACKLOG.md`.
+Default branch: `main`.

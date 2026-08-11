@@ -1,6 +1,6 @@
 # First Deployment and Verification Plan
 
-**Status:** technical deployment and acceptance complete; human onboarding pending
+**Status:** COMPLETE — human onboarding done 2026-08-11; the ledger is in daily use
 **Prepared:** 2026-07-15
 **Scope:** take the code-complete Family Expenses app from its current local
 state to a verified first production deployment without breaking the
@@ -225,7 +225,8 @@ Add these checks beyond the current smoke script:
 - Valid temporary portal link loads the Chinese UI.
 - Add, list, edit, mark paid, unmark paid, history, and delete all work through
   the deployed API.
-- A real MCP client completes initialize, `tools/list` (exactly 9 tools), and
+- A real MCP client completes initialize, `tools/list` (exactly 10 tools since
+  v0.5.0; the 2026-07-15 run saw 9), and
   `prompts/list` (exactly 3 prompts) through the public `/mcp` URL.
 - MCP conversational flows work in Chinese and English: add a spoken amount,
   list unpaid, fuzzy mark-paid, correction, ambiguity with candidates, history,
@@ -281,9 +282,22 @@ Required acceptance evidence:
 - Final public smoke passed on revision 00004, temporary expenses were deleted,
   temporary tokens were revoked, and the accepted revision had no ERROR logs.
 
-## Wave 6 — human onboarding
+## Wave 6 — human onboarding · COMPLETE 2026-08-11
 
-Only after all prior gates pass:
+The link was sent and she is using the portal daily. Recorded outcomes:
+
+- The real `wife` link was minted, revoked once during MCP testing, and re-minted;
+  the live one is id `4981964a048d` (never expires).
+- She has signed in through Auth0 (`matthewfarm@icloud.com`) and is entering
+  expenses from her phone — confirmed by portal-authored rows and by an audit
+  trail showing a create/delete/re-entry performed from the portal, not the MCP.
+- The owner's MCP connector is live on claude.ai at the stable `/mcp` URL with
+  no authorization header, and has been used for reads, writes, link listing and
+  revocation throughout 2026-08-10/11.
+- Portal writes were unattributed at the moment of onboarding; v0.8.1 stamps
+  them with the link label, so the audit trail now distinguishes the two writers.
+
+The steps as originally planned, for the record:
 
 0. ~~**BLOCKED until v0.4.5 is deployed.**~~ **CLEARED 2026-08-10.** The stored
    XSS is fixed and live on revision `00005-5tz`; smoke passed and the fix was
@@ -301,9 +315,9 @@ Only after all prior gates pass:
    a reversible write. ChatGPT custom MCP availability and write permissions
    depend on workspace plan and admin settings, so treat ChatGPT as an
    additional client acceptance test rather than the only launch gate.
-5. The technical release record, changelog, and tag are complete. After the
-   household flow succeeds, change this plan's status from onboarding pending
-   to fully complete. Never record the database URI or portal token.
+5. ~~After the household flow succeeds, change this plan's status.~~ **Done
+   2026-08-11** — status at the top of this file is now COMPLETE. Never record
+   the database URI or portal token.
 
 ## Operations after launch
 

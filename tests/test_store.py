@@ -299,8 +299,6 @@ class NaturalInputTests(unittest.TestCase):
         self.assertEqual(len(self.store.find("足球", status="unpaid")), 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class SummaryMatchesTheRowsTests(unittest.TestCase):
@@ -381,3 +379,7 @@ class CodexVerifyRegressionTests(unittest.TestCase):
         backward = self.store.summarize(list(reversed(self.store.list())), today="2026-08-11")
         self.assertEqual(forward["unpaid"], backward["unpaid"])
         self.assertEqual(forward["total"], backward["total"])
+
+
+if __name__ == "__main__":
+    unittest.main()

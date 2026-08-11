@@ -242,8 +242,6 @@ class CategoryParityTests(unittest.TestCase):
         self.assertIn(f'var BORROW = "{BORROW_CATEGORY}"', html)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class AuthorIsAuthoritativeTests(unittest.TestCase):
@@ -276,3 +274,43 @@ class AuthorIsAuthoritativeTests(unittest.TestCase):
     def test_link_label_never_leaks_into_a_response(self):
         r = self.client.post("/api/list", json={"token": self.token})
         self.assertNotIn("_link_label", r.text)
+
+
+class DocumentedCountsTests(unittest.TestCase):
+    """The living docs quote a test count; it drifted four times in one session.
+
+    Scoped to the three docs that carry the runnable command — CHANGELOG and
+    FIRST_DEPLOY_PLAN quote historical counts on purpose and are left alone.
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+    LIVING = ("CLAUDE.md", "README.md", "docs/RUNBOOK.md")
+
+    def actual_test_count(self) -> int:
+        return sum(
+            len(re.findall(r"^    def test_", p.read_text(encoding="utf-8"), re.M))
+            for p in sorted((self.ROOT / "tests").glob("test_*.py"))
+        )
+
+    def test_documented_test_count_matches_reality(self):
+        actual = self.actual_test_count()
+        for name in self.LIVING:
+            text = (self.ROOT / name).read_text(encoding="utf-8")
+            # any "N tests" claim, not just the one in the run command —
+            # a prose mention in the status section drifted the same day this
+            # guard was written
+            for quoted in re.findall(r"(\d+) tests", text):
+                self.assertEqual(
+                    int(quoted), actual,
+                    f"{name} advertises {quoted} tests; the suite has {actual}",
+                )
+
+    def test_documented_tool_count_matches_the_server(self):
+        mcp_src = (self.ROOT / "app" / "mcp_server.py").read_text(encoding="utf-8")
+        actual = mcp_src.count("@mcp.tool")
+        claude_md = (self.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn(f"{actual} tools", claude_md)
+
+
+if __name__ == "__main__":
+    unittest.main()

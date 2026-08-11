@@ -14,6 +14,44 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: health + portal routes OK.
 
+## [0.8.2] — 2026-08-11
+
+Documentation pass. No behavior change except the new guard.
+
+### Added
+- `docs/BACKLOG.md` §2 — the portal decides "today" from the device clock, not
+  `APP_TZ`, so travel or a wrong phone clock can shift a row between Due and
+  Upcoming around midnight. §3 — currencies are summed without conversion; one
+  non-CNY row makes every total meaningless. Both surfaced by cross-model review.
+- `DocumentedCountsTests` — the living docs' test and tool counts are now
+  asserted against reality. The count drifted four times in one session; it
+  caught a stale prose mention within a minute of being written.
+
+### Fixed
+- **`unittest.main()` sat mid-file in three test modules.** Classes appended
+  after it were invisible to a direct `python3 tests/test_x.py` run — they only
+  executed under `discover`. Found while trying to prove the new guard works,
+  which is the only reason it was noticed.
+- Docs reconciled against the code: contract status was pinned at v0.4.5 and
+  claimed 9 tools; the runbook advertised 99 tests; the README claimed
+  onboarding was outstanding; `FIRST_DEPLOY_PLAN` still said "onboarding
+  pending" and its re-runnable acceptance gate expected 9 tools.
+
+### Changed
+- **`FIRST_DEPLOY_PLAN.md` Wave 6 recorded COMPLETE (2026-08-11).** She is
+  onboarded and using the portal daily; the owner's connector is live. This was
+  the milestone the whole plan existed to reach.
+- `CLAUDE.md` "Current state" rewritten from an accreting reverse-chronological
+  changelog into orientation: what is live, that two real people depend on it,
+  that the portal has a login while `/mcp` deliberately does not, and the two
+  failure modes this project has actually hit (silent no-op edits; handoffs
+  smuggling in a demo backend).
+- Contract §4/§6/§8 describe the app as it is: `date` is the due date, `borrow`
+  is arithmetic-bearing, portal writes are attributed server-side, `/api/list`
+  takes `overdue` and summarises the rows it returns, and the UI is three tabs.
+- `BACKLOG.md` §1's "do it before onboarding" advice is obsolete — that window
+  closed today; the two items fixed in 0.8.0/0.8.1 were struck from §4.
+
 ## [0.8.1] — 2026-08-11
 
 Six defects found by cross-model review (Codex/GPT-5.4) of 0.7.0–0.8.0. All six

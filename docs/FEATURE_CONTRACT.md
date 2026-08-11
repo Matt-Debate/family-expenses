@@ -1,6 +1,6 @@
 # Feature Contract — Family Expenses
 
-**Status:** ACTIVE (v0.4.5 — deployed; stored-XSS fix live, A8 re-verified)
+**Status:** ACTIVE (v0.8.1 — deployed; in daily household use since 2026-08-11)
 **Owner:** matt-debate
 **Repo:** `Matt-Debate/family-expenses`
 **Default branch:** `main`
@@ -53,14 +53,14 @@ no arrays, no PG-only expressions.
 | column | type | notes |
 |---|---|---|
 | `id` | TEXT PK | 12-hex app-generated |
-| `date` | TEXT NOT NULL | `YYYY-MM-DD` |
+| `date` | TEXT NOT NULL | `YYYY-MM-DD` — the **due** date: when it must be paid |
 | `amount` | REAL NOT NULL CHECK > 0 | |
 | `currency` | TEXT NOT NULL DEFAULT 'CNY' | code only, no FX |
-| `category` | TEXT | optional, suggested list in UI |
+| `category` | TEXT | free text; canonical keys in `store.CATEGORIES`. **`borrow` is arithmetic-bearing** — money she fronted, owed back, excluded from every household total |
 | `description` | TEXT | what it was |
 | `paid` | BOOLEAN NOT NULL DEFAULT FALSE | |
 | `paid_date` | TEXT | required iff `paid` (CHECK) |
-| `submitted_by` | TEXT | free-text name (attribution, not auth) |
+| `submitted_by` | TEXT | attribution, not auth. Portal writes are stamped server-side with the link's label and ignore any client value; MCP callers name the speaker |
 | `created_at` / `updated_at` | TEXT NOT NULL | app-managed UTC ISO |
 
 ### `expense_history` (append-only)
@@ -111,7 +111,7 @@ portal page and the MCP mount.
 
 | endpoint | body (besides `token`) | effect |
 |---|---|---|
-| `/api/list` | `status?: all\|paid\|unpaid, since?, until?` | expenses newest-first + summary totals |
+| `/api/list` | `status?: all\|paid\|unpaid\|overdue, since?, until?` | matching expenses + **totals for exactly those rows** (`Store.summarize`) |
 | `/api/submit` | `date, amount, currency?, category?, description?, submitted_by?` | insert + history(`create`) |
 | `/api/update` | `id, fields{date?,amount?,currency?,category?,description?,submitted_by?}, changed_by?` | update + history(`update`) |
 | `/api/mark-paid` | `id, paid, paid_date?, changed_by?` | set paid state + history(`mark_paid`/`unmark_paid`) |
@@ -126,11 +126,11 @@ commit-on-success / rollback-on-error.
 
 ## 7. MCP surface (operator)
 
-Tools (9) on the Cloud Run streamable-HTTP MCP: `expenses_help`,
+Tools (10) on the Cloud Run streamable-HTTP MCP: `expenses_help`,
 `expenses_list`, `expenses_add`, `expenses_update`, `expenses_mark_paid`,
 `expenses_delete`, `expenses_history`, `expenses_mint_link`,
-`expenses_revoke_link` — inventory rationale in `docs/MCP_DESIGN.md`
-(`expenses_summary` folded into `list`). Plus three persona prompts
+`expenses_revoke_link`, `expenses_list_links` — inventory rationale in
+`docs/MCP_DESIGN.md` (`expenses_summary` folded into `list`). Plus three persona prompts
 (记账/对账/修复). Same store as the portal, so history/atomicity rules apply
 identically.
 
@@ -145,9 +145,20 @@ correcting call; write results carry the running unpaid total.
 
 ## 8. UI
 
-One mobile-first page, bilingual **中文 (default) / English**: add form
-(amount, description, date), list newest-first with inline edit, "✓ 已付 /
-mark paid" with date, paid/unpaid filter, running totals.
+One mobile-first page, bilingual **中文 (default) / English**, three tabs:
+
+- **Due** — summary cards (due now · paid this month · upcoming within 30 days ·
+  owed back to her), collapsible add form, what is due in the next 30 days, then
+  what was paid this month.
+- **History** — a statement: one row per month (txns · paid · outstanding), most
+  recent first, tap to expand into that month's items. Scheduled future months
+  sit in their own group below.
+- **Stats** — figures and hand-rolled inline SVG charts (no chart library: no
+  build step and no CDN is what makes this load behind the GFW).
+
+The portal speaks in **her** voice — the owner works through the MCP — and spend
+figures name Matt rather than claiming to be household totals. Visual design by
+Claude Design (Fable), v0.7.0: a typographic ledger on warm paper.
 
 ## 9. Acceptance criteria
 
