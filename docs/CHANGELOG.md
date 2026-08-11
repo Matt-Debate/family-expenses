@@ -49,6 +49,16 @@ them are the Classes tab; none touches money, the MCP surface, or §5.1.
   missed classes from last month is one date pick rather than three.
 
 ### Fixed
+- **A consequence of the above, on the MCP side: two same-named packs became
+  unresolvable.** `classes_log(query=…)` disambiguates on `name` +
+  `period_label`, and a per-class pack created from the portal now has no period
+  label — so two terms of 足球课 returned two candidates that were identical in
+  every field shown, and the disambiguation question the agent is instructed to
+  ask had no answer. Candidates now carry the **payment that funds each one**
+  (date · description · amount), and `query` matches the payment description as
+  well, so `query='8月'` resolves again — `8月` lives in "Football (8月, 10课)"
+  now that it has nowhere else to live. The owner logs classes through MCP; this
+  would have been his path, not hers.
 - **Deleting an attendance record asked nothing.** A 12px `×` beside the class
   log, one mis-tap from erasing attendance — and on a period package, from
   handing the school back a class it owed. It now confirms, and the question
@@ -59,12 +69,13 @@ them are the Classes tab; none touches money, the MCP surface, or §5.1.
   under her thumb before the picker could open.
 
 ### Tests
-250 → 268. Thirteen mutations were applied to the new code — the filter deleted,
+250 → 270. Fifteen mutations were applied to the new code — the filter deleted,
 the category match made exact, the period box pinned open and pinned shut, the
 cleared field left populated, the picker ignored, a blank date posted as-is, the
 picker tap left toggling, the confirm removed, Cancel ignored, the remembered
-date forgotten, the confirm's subject dropped, and a typo in `CLASS_CATEGORIES`
-— and every one is caught. `ClassPeriodFieldTests` and the extended
+date forgotten, the confirm's subject dropped, a typo in `CLASS_CATEGORIES`, the
+payment stripped from the MCP candidates and the payment description dropped
+from the matcher — and every one is caught. `ClassPeriodFieldTests` and the extended
 `ClassTabInteractionTests` execute the portal's own JS under node rather than
 grepping its source; the two grep-shaped guards that remain are there because a
 function nothing calls is a no-op the node harness cannot see.

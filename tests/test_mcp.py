@@ -393,6 +393,33 @@ class AgentErgonomicsTests(unittest.TestCase):
         result = self.call("classes_log", kind="attended", query="9月")
         self.assertEqual(result["period_label"], "9月")
 
+    def test_two_same_named_packs_are_told_apart_by_their_payment(self):
+        """Since v0.10.1 the portal does not ask a per_class pack for a period
+        label, so two terms of 足球课 created there are both called 足球课 with
+        nothing else on them. Candidates carrying only name/period_label/kind
+        would be three identical rows, and the disambiguation question the agent
+        is told to ask the user would have no answer.
+        """
+        for month in ("8月", "9月"):
+            self.call("expenses_add", amount="1000", description=f"足球课 {month}")
+            self.call("classes_add", name="足球课", class_count=5, query=month)
+
+        result = self.call("classes_log", kind="attended", query="足球课")
+        self.assertEqual(result["matched"], 2)
+        payments = [c["payment"] for c in result["candidates"]]
+        self.assertEqual(len(set(payments)), 2, f"indistinguishable: {payments}")
+        self.assertTrue(any("8月" in p for p in payments))
+
+    def test_a_pack_with_no_period_label_is_reachable_by_its_payment(self):
+        """'8月' has nowhere else to match once the portal stops asking for a
+        period label — it lives in the payment, "足球课 8月"."""
+        for month in ("8月", "9月"):
+            self.call("expenses_add", amount="1000", description=f"足球课 {month}")
+            self.call("classes_add", name="足球课", class_count=5, query=month)
+
+        result = self.call("classes_log", kind="attended", query="9月")
+        self.assertEqual(result["expense"]["description"], "足球课 9月")
+
     def test_an_archived_course_is_still_reachable_by_the_agent(self):
         """classes_list hides it by default; that must not make it impossible
         to correct a class logged against it."""

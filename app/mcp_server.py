@@ -347,6 +347,10 @@ def build_mcp(store: Store) -> FastMCP:
             p for p in packages
             if text in (p["name"] or "").lower()
             or text in (p["period_label"] or "").lower()
+            # the funding payment too: a per_class pack carries no period label
+            # since v0.10.1 (the portal stopped asking for one), so '8月' has
+            # nowhere else to match — it lives in "Football (8月, 10课)"
+            or text in (p["expense"]["description"] or "").lower()
         ]
         if len(matches) == 1:
             return matches[0]["id"], None
@@ -358,13 +362,20 @@ def build_mcp(store: Store) -> FastMCP:
             }
         return None, {
             "matched": len(matches),
+            # name + period_label alone made two per_class packs called
+            # 'Football' indistinguishable, so the disambiguation question had no
+            # answer. The payment that funds each one is what tells them apart.
             "candidates": [
                 {"package_id": p["id"], "name": p["name"],
-                 "period_label": p["period_label"], "kind": p["kind"]}
+                 "period_label": p["period_label"], "kind": p["kind"],
+                 "payment": f"{p['expense']['date']} · "
+                            f"{p['expense']['description'] or '–'} · "
+                            f"¥{p['expense']['amount']:.2f}"}
                 for p in matches[:8]
             ],
-            "hint": ("several courses match — show these to the user, ask which, "
-                     "then call again with that package_id"),
+            "hint": ("several courses match — show these to the user, ask which "
+                     "(the `payment` field is what tells two same-named courses "
+                     "apart), then call again with that package_id"),
         }
 
     @mcp.tool(annotations=_READ)
