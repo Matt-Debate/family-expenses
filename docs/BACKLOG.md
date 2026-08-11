@@ -108,7 +108,27 @@ Related, from the same review:
   total is corrupted — `Store.summarize` is untouched — but the two views
   describe one payment two ways with nothing reconciling them.
 
-## 4. Neon's restore window has never been recorded or rehearsed
+## 4. Form-submit handlers are an untested layer, project-wide
+
+**Filed 2026-08-11** by the ninth review round of v0.10.0. Priority: low, but it
+is the one structural gap that survived nine rounds.
+
+`app/portal.html`'s two submit handlers — `addForm` (expenses, live since v0.1)
+and `addClsForm` (classes, v0.10.0) — are referenced by no test. Four mutations
+of the class one survive the whole suite, each producing a visibly wrong figure:
+hard-coding `kind` to `per_class` makes a monthly fee report "10/10 classes
+left" and never show what the school owes; `class_count + 1` turns a ¥220 rate
+into ¥200 and drags every remaining/owed figure with it; taking `expense_id`
+from `candidates[0]` links the course to the wrong payment; swapping name and
+period label mislabels it.
+
+The endpoints they call are well covered, and `ClassRowRenderingTests` /
+`ClassTabInteractionTests` now execute the render and click paths under node, so
+the pattern for closing this exists — a handler harness like the one in
+`ClassTabInteractionTests`, driving a submit event with stub form fields. Worth
+doing for both forms at once rather than only the newer one.
+
+## 5. Neon's restore window has never been recorded or rehearsed
 
 **Filed 2026-08-11.** Priority: medium — this is the only item here that could
 cost real data.

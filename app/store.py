@@ -209,6 +209,14 @@ class Store:
             )
         if not (val > 0):
             raise ValidationError(f"amount must be greater than 0, got {val}")
+        if val > 1e12:
+            # No household expense is a trillion yuan, and without a ceiling
+            # two absurd rows make fsum() return inf in summarize() — the same
+            # unrecoverable 500-on-every-load as an infinite amount, one layer
+            # up. Rejecting the write is the only place this can be stopped.
+            raise ValidationError(
+                f"amount {original!r} is implausibly large — check the digits"
+            )
         if not isfinite(val):
             # `inf > 0` is True, so this passed the check above and committed.
             # JSONResponse serialises with allow_nan=False, so EVERY later

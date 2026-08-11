@@ -13,6 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.db import Database  # noqa: E402
+from math import isfinite  # noqa: E402
+
 from app.store import Store, ValidationError  # noqa: E402
 
 
@@ -125,6 +127,14 @@ class ValidationTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     self.store.create(date="2026-07-14", amount=bad)
         self.assertEqual(self.store.list(), [], "a bad amount was persisted")
+
+    def test_an_absurd_amount_cannot_overflow_the_totals(self):
+        """Two rows near the float ceiling make fsum() return inf, and every
+        total then serialises to a 500 — the same lockout one layer up."""
+        with self.assertRaises(ValidationError):
+            self.store.create(date="2026-07-14", amount=1e308)
+        self.store.create(date="2026-07-14", amount=999_999_999_999)  # still fine
+        self.assertTrue(isfinite(self.store.summary(today="2026-07-14")["total"]))
 
     def test_date_format(self):
         for bad in ("", None, "14/07/2026", "2026-7-4"):

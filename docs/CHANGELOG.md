@@ -214,6 +214,19 @@ inert guard and, outside the feature, one way to lock her out of the portal.
   precisely how it came to exceed the payment. A future implementer reading the
   contract as spec would have reintroduced it.
 
+### Closed out
+The ninth round returned **clean — no must-fix, no should-fix** — after an
+independent 6.26-million-case sweep of the money arithmetic found zero invariant
+violations. Two things closed alongside it:
+
+- **An absurd expense amount could still overflow the totals.** Two rows near
+  the float ceiling make `fsum` return `inf`, and every total then serialises to
+  a 500 — the same unrecoverable lockout as the infinite amount, one layer up.
+  Capped at ¥1e12; no household expense is a trillion yuan.
+- `docs/BACKLOG.md` §4 records the one structural gap that survived all nine
+  rounds: **both** of the portal's form-submit handlers — the expense one live
+  since v0.1, and the new class one — are executed by no test.
+
 ### Changed
 - `classes_log` validates the event kind **before** resolving which course was
   meant — a bad kind is wrong whichever course it is, and reporting "no such
