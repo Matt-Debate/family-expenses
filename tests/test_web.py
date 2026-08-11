@@ -1177,6 +1177,17 @@ packages[1].expense.description = "Football (9月, 10课)";
         self.assertIn("8月", titles[0])
         self.assertIn("9月", titles[1])
 
+    def test_a_row_with_a_write_in_flight_renders_its_picker_disabled(self):
+        """A repaint would otherwise draw a live-looking date box over a course
+        whose log is still in the air — inviting exactly the edit the disabled
+        state exists to prevent."""
+        html = self.render(open_ids=["p1"], seed="clsBusy = {p1: true};")
+        self.assertIn('id="c-date-p1" value="2026-08-11" disabled=""', html)
+
+    def test_an_idle_row_renders_its_picker_live(self):
+        html = self.render(open_ids=["p1"])
+        self.assertNotIn("disabled", html)
+
     def test_a_closed_row_hides_the_date_picker_with_its_buttons(self):
         html = self.render(open_ids=[])
         self.assertIn('class="clsdate" hidden=""', html)
@@ -1619,6 +1630,29 @@ resolveLog();
         state = self.run_handler("pending = true;\n" + self.LOG_TAP)
         self.assertTrue(state["pickerDisabled"], "she can still edit under the write")
 
+    def test_the_picker_comes_back_when_the_log_succeeds(self):
+        """Disabling it is only half a lifecycle. A success normally repaints
+        the row, which replaces the input — but refreshClasses() repaints only
+        if its own request lands, so on a flaky link the box stays dead."""
+        state = self.run_handler(self.LOG_TAP)
+        self.assertFalse(state["pickerDisabled"], "the date box never came back")
+
+    def test_the_picker_comes_back_when_the_server_refuses(self):
+        """A refusal requests no repaint at all, so nothing else can restore
+        it — she is left with a dead box after mistyping a date."""
+        state = self.run_handler(
+            'rejectWith = new Error("bad date"); rejectWith.answered = true;\n'
+            + self.LOG_TAP)
+        self.assertFalse(state["pickerDisabled"])
+
+    def test_the_picker_stays_dead_while_the_outcome_is_unknown(self):
+        """The other half: an ambiguous failure holds the whole course, and a
+        live-looking date box would invite the retry that can double-log."""
+        state = self.run_handler(
+            'rejectWith = new Error("network");\n' + self.LOG_TAP)
+        self.assertTrue(state["pickerDisabled"])
+        self.assertEqual(state["busy"], {"p1": True})
+
     def test_the_reset_asks_the_box_not_an_event_counter(self):
         """A counter of `change` events cannot see a re-pick of the value
         already shown — `<input type="date">` fires nothing when the value does
@@ -1815,6 +1849,17 @@ api("classes-log", {{}}).then(
         self.assertEqual(result["outcome"], "rejected")
         self.assertTrue(result["answered"], "a refusal the server sent is not in doubt")
         self.assertEqual(result["msg"], "bad date")
+
+    def test_a_200_carrying_ok_false_is_marked_answered(self):
+        """The API answers 200 with {ok: false} for a validation refusal, so a
+        fixture that sets BOTH r.ok=false and j.ok=false cannot tell the two
+        halves of the check apart — dropping `|| !j.ok` would survive it."""
+        result = self.call_api(
+            'function () { return Promise.resolve({ok: true, json: function () {'
+            ' return Promise.resolve({ok: false, error: "amount must be > 0"}); }}); }')
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertTrue(result["answered"])
+        self.assertEqual(result["msg"], "amount must be > 0")
 
     def test_a_network_failure_is_not_marked_answered(self):
         """The whole point: this one may have committed."""

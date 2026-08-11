@@ -279,8 +279,26 @@ as given rather than argued with.
   disabled while its write is in flight**, and a repaint keeps it disabled
   rather than drawing a live-looking box over a locked course.
 
+### Fixed after the fifth cross-model round
+The first round with **no must-fix**. Three should-fixes, one of them a real
+lifecycle defect the round before had introduced.
+
+- **The date picker was disabled when a write began and never re-enabled.** On
+  success a repaint usually replaced it, but `refreshClasses()` repaints only if
+  its own request lands; after an answered refusal no repaint is requested at
+  all. So mistyping a date left her with a dead box until she forced a repaint
+  or reloaded. Release now re-finds the picker and enables it for a success or
+  an answered refusal, and keeps it disabled for an ambiguous failure — where a
+  live-looking box would invite the retry that can double-log.
+- No renderer test proved `clsBusy` actually emits `disabled`, and none proved
+  the picker came back; the fix above was green without a single test noticing.
+- `ApiErrorShapeTests` set both `r.ok=false` and `j.ok=false`, so it could not
+  tell the two halves of that check apart — dropping `|| !j.ok` survived it. The
+  API answers **200 with `{ok: false}`** for a validation refusal, which is now
+  its own case.
+
 ### Tests
-250 → 332, and two review rounds closed three long-standing coverage gaps:
+250 → 339, and two review rounds closed three long-standing coverage gaps:
 **BACKLOG §4 is closed** — both form-submit handlers now run under node, the
 class one (`addClsForm`) and the expense one (`addForm`, live since v0.1 and the
 one that writes money directly). All four mutations §4 named as surviving are
@@ -290,7 +308,7 @@ have a top-level key-parity guard (deleting an English key left the whole suite
 green, and the dialog then reads the literal key), and the whole-course delete
 confirm is driven by a test rather than only its endpoint.
 
-Ninety-eight mutations were applied to the new code — the filter deleted,
+A hundred and four mutations were applied to the new code — the filter deleted,
 the category match made exact, the period box pinned open and pinned shut, the
 cleared field left populated, the picker ignored, a blank date posted as-is, the
 picker tap left toggling, the confirm removed, Cancel ignored, the remembered

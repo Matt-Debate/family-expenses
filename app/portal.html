@@ -1371,6 +1371,16 @@
     clsBusy[id] = true;
     b.disabled = true;
     if (dateEl) dateEl.disabled = true;   // before any repaint, not only after
+    function releaseCourse() {
+      // the picker is re-found by id and re-enabled with the buttons. Leaving
+      // it out left her with a dead date box whenever no repaint followed —
+      // which is EVERY answered refusal (no refresh is requested) and any
+      // success whose refreshClasses() then failed.
+      clsBusy[id] = false;
+      b.disabled = false;
+      var el = document.getElementById("c-date-" + id);
+      if (el) el.disabled = false;
+    }
     // No timeout releases this lock. A 30s release was tried and is a WORSE
     // bug than the one it fixes: the request it gives up on may already have
     // committed server-side, so the retry it permits writes a second
@@ -1393,7 +1403,7 @@
         }
         toast(t("cls_logged") + " · " + d); refreshClasses();
       })
-      .then(function () { clsBusy[id] = false; b.disabled = false; })
+      .then(releaseCourse)
       .catch(function (e) {
         toast(e.message);
         // Release ONLY if the server answered — then we know nothing was
@@ -1403,7 +1413,7 @@
         // permits writes a SECOND row and summarize_package counts both.
         // Staying locked is visible and costs a reload; the duplicate is
         // neither visible nor recoverable.
-        if (e && e.answered) { clsBusy[id] = false; b.disabled = false; }
+        if (e && e.answered) releaseCourse();
       });
   });
 
