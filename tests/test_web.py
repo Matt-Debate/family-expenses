@@ -349,6 +349,41 @@ class DocumentedCountsTests(unittest.TestCase):
         self.assertEqual(body.count("**What happened.**"), body.count("**Rule.**"),
                          "an entry states a rule with no failure behind it, or vice versa")
 
+    def test_the_contract_api_table_matches_the_routed_endpoints(self):
+        """§6 is the API contract. An endpoint missing from it is undocumented
+        surface; one listed that does not exist sends the next session looking
+        for something that was never built. `midnight_in` reached the table
+        only because someone remembered."""
+        import re as _re
+
+        from app.api import HANDLERS
+
+        body = (self.ROOT / "docs" / "FEATURE_CONTRACT.md").read_text(encoding="utf-8")
+        documented = set(_re.findall(r"\| `/api/([a-z-]+)`", body))
+        self.assertEqual(documented, set(HANDLERS),
+                         "the contract's API table and the routed endpoints differ")
+
+    def test_documented_tool_count_matches_reality(self):
+        """The suite pinned the TEST count and nothing else, so the MCP tool
+        count drifted instead: README advertised 10 while 13 shipped. The
+        changelog records the same failure happening once before, to the
+        contract and the runbook. Pin every count a living doc asserts, not
+        only the one that bit you last time.
+        """
+        import re as _re
+
+        source = (self.ROOT / "app" / "mcp_server.py").read_text(encoding="utf-8")
+        actual = len({
+            name for name in _re.findall(r"^    def (\w+)\(", source, _re.M)
+            if name.startswith(("expenses_", "classes_"))
+        })
+        for name in self.LIVING + ("docs/FEATURE_CONTRACT.md", "docs/MCP_DESIGN.md"):
+            body = (self.ROOT / name).read_text(encoding="utf-8")
+            for claim in _re.findall(r"(\d+) tools", body):
+                with self.subTest(doc=name, claim=claim):
+                    self.assertEqual(int(claim), actual,
+                                     f"{name} advertises {claim} tools, {actual} exist")
+
     def test_documented_test_count_matches_reality(self):
         actual = self.actual_test_count()
         for name in self.LIVING:

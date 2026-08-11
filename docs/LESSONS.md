@@ -217,7 +217,28 @@ real fix would take.
 
 ---
 
-## 12. Verify anything that arrives from outside
+## 12. Pin every number a living doc asserts, not just the one that bit you
+
+**What happened.** Twice. In an earlier release the contract claimed 9 tools,
+the runbook advertised 99 tests and the README disagreed with both;
+`DocumentedCountsTests` was written to pin the **test count** and stop it
+recurring. It recurred anyway, in the next column over: the README advertised
+**10 MCP tools while 13 shipped**, and the guard did not look at tool counts.
+Found by a doc-freshness sweep, not by the suite.
+
+**Rule.** When a doc asserts a number about the code, add it to the parity test
+in the same commit — test count, tool count, table count, whatever it is. A
+guard scoped to the single instance that caused pain leaves every sibling
+unguarded, and doc drift is invisible precisely because nothing fails.
+
+Historical counts are different: `CHANGELOG.md` and `FIRST_DEPLOY_PLAN.md`
+quote what was true at the time, on purpose. Parity tests must exclude them by
+name, which is also why a freshness sweep needs a human read of any hit in
+those files rather than a blind fix.
+
+---
+
+## 13. Verify anything that arrives from outside
 
 **What happened.** A design handoff carried an in-memory demo backend reachable
 at `if (!TOKEN) return demoApi(...)`. It never fired in production, but for a

@@ -14,7 +14,7 @@ Built to replace free-text WeChat messages — not a business system.
   accounts. Every change is recorded in an append-only history.
 - **Store** — Postgres (Neon) in production; the same portable SQL runs the
   test suite on sqlite with no database server.
-- **MCP** — streamable-HTTP server (Python `mcp` SDK) on Cloud Run: 10 tools
+- **MCP** — streamable-HTTP server (Python `mcp` SDK) on Cloud Run: 13 tools
   built for casual speech (fuzzy targeting, coached errors, bilingual
   triggers) plus 记账/对账/修复 persona prompts — design rationale in
   `docs/MCP_DESIGN.md`.
@@ -38,7 +38,7 @@ Built to replace free-text WeChat messages — not a business system.
 
 ```bash
 pip install -r requirements.txt
-python3 -m unittest discover -s tests        # 339 tests, sqlite, no DB server
+python3 -m unittest discover -s tests        # 341 tests, sqlite, no DB server
 python3 -m app.main                          # http://localhost:8080
 python3 scripts/mint_link.py --label wife --base-url http://localhost:8080
 ```
