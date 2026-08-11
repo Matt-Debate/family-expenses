@@ -13,8 +13,17 @@ carry them.)
 ## [0.9.0] — 2026-08-11
 
 Clears `docs/BACKLOG.md`: every deferred code defect is fixed, the two
-operational unknowns are resolved, and the doc drift is gone. Each fix has a
-regression test that was observed failing against the unfixed code first.
+operational unknowns are resolved, and the doc drift is gone.
+
+Each **code defect** has a regression test that was observed failing against the
+unfixed code first. Two items are not code defects and their tests do not fail
+against the old code, by design: the `APP_TZ` item was filed as a missing test,
+and the constraint-hardening item is new behavior. Said plainly because the first
+draft of this entry claimed all eight were failing-first, which was not true.
+
+Reviewed before release by three independent passes (two adversarial agents and
+a cross-model Codex review). All three found the same regression in the first
+draft — a portal that cached the server's date forever — which is fixed below.
 
 ### Fixed
 - **A search for a literal `%` returned the entire ledger.** `store.find` built
@@ -25,8 +34,11 @@ regression test that was observed failing against the unfixed code first.
   mark_paid. A failure in between left the expense saved-but-unpaid while the
   tool reported an error, breaking the same-transaction history guarantee at the
   tool boundary. `Store.create` now takes `paid`/`paid_date` and writes one row
-  with one `create` history entry. An already-paid expense with no payment date
-  given is dated to its due date rather than to today.
+  with one `create` history entry. The default payment date (today, in `APP_TZ`)
+  is decided in `Store.create` alone — `expenses_add` used to layer a second
+  default on top of it, so the two could disagree and the store's rule was
+  unreachable. The portal's history view now shows the payment date such a row
+  carries, which the collapsed single entry would otherwise have hidden.
 - **A missing expense raised a bare `KeyError`**, which the HTTP layer turned
   into a clean 404 but the MCP surfaced to the agent as just the id — no hint
   about how to retry. `NotFoundError` subclasses `KeyError` (so the 404 mapping
@@ -35,7 +47,16 @@ regression test that was observed failing against the unfixed code first.
   `APP_TZ`, so a travelling or mis-set device could move a row between Due and
   Upcoming, or a month between History and Scheduled. `/api/list` now returns
   the household's `today` and the page uses it; the device is only the
-  first-paint fallback.
+  first-paint fallback. The page advances that date by however long it has been
+  open, using **elapsed** time rather than the device's absolute clock — the
+  first draft pinned it forever, so a tab left open overnight would have gone on
+  offering yesterday as the payment date, and an accepted default writes a wrong
+  date into the ledger. Returning to a backgrounded tab also re-syncs.
+  `PortalDateArithmeticTests` runs the page's own date functions under node
+  rather than grepping for them, which is what caught this.
+- **`/api/list` read the clock twice** — once for the summary, once for the
+  `today` it returns — so a request straddling midnight could bucket rows
+  against one day and label them with the next.
 - **Every API handler blocked the event loop.** The handlers are synchronous and
   all of them hit the database, so one slow round trip to Neon stalled every
   other request in the process, `/health` included. They now run in a
@@ -54,16 +75,21 @@ regression test that was observed failing against the unfixed code first.
   it and silently corrupt the audit order. Applied **best-effort**, each
   statement in its own transaction with a logged warning on failure: this is a
   live portal, and a constraint that cannot apply to existing data must not be
-  able to stop the service from starting. Production verified free of duplicates
-  before shipping.
+  able to stop the service from starting; `Database.init` logs a warning naming
+  how many constraints are not in force. An operator check on 2026-08-11 found
+  production free of duplicates — a point-in-time observation, not something
+  this repo can verify.
 
 ### Changed
 - **The ledger is CNY-only, and now says so.** `currency` was stored but never
   consulted — `summarize()`, the portal cards and the charts all add `amount`
   regardless — so a single foreign row would have made every monetary figure in
   the app silently wrong. Non-CNY is refused at the store with an error that
-  explains why. Nothing could write one anyway (the portal has no currency
-  field, the MCP no parameter), and all 19 production rows are CNY.
+  explains why. The portal UI has no currency field and the MCP exposes no
+  parameter, but `/api/submit` and `/api/update` read `currency` from the
+  request body, so any link holder could reach it — the guard is load-bearing,
+  not decorative. Every production row was CNY when this shipped (operator
+  check, 2026-08-11).
 - `docs/IMPLEMENTATION_PLAN.md` is labelled a **historical record** frozen at
   v0.2.0, and contract §10 no longer claims it stays in sync. It said "five
   tools" (ten) and named `/healthz` as the health endpoint; both are annotated

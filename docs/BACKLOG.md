@@ -7,8 +7,8 @@ deferred, so a future session can judge whether that reasoning still holds.
 **Cleared 2026-08-11 (v0.9.0):** every code defect that was filed here is fixed
 with a regression test, and the two operational unknowns turned out to need no
 action. See `docs/CHANGELOG.md` [0.9.0] for what each one actually cost. What
-survives below is one item the owner deliberately deferred and one that cannot
-be verified from inside this repo.
+survives below is one item the owner deliberately deferred, one found by the
+review of that release, and one that cannot be verified from inside this repo.
 
 ---
 
@@ -51,7 +51,31 @@ against the fact that the only symptom is a logo.
 
 ---
 
-## 2. Neon's restore window has never been recorded or rehearsed
+## 2. MCP tool calls still block the event loop
+
+**Filed 2026-08-11**, during the adversarial review of v0.9.0. Priority: low at
+two users; it is the unfinished half of a fix that shipped.
+
+v0.9.0 moved the `/api/*` handlers off the event loop with `run_in_threadpool`.
+The ten MCP tools in `app/mcp_server.py` are all plain `def` and were left alone
+on the strength of a claim — written in the old backlog — that "FastMCP uses a
+threadpool". **That claim is false.** A reviewer read the installed `mcp` 1.26.0:
+`FuncMetadata.call_fn_with_arg_validation` ends in `return fn(**arguments)` for
+synchronous functions, with no `to_thread`, and confirmed it empirically by
+observing `Store.list` execute on `MainThread` during an `expenses_list` call.
+
+**Consequence.** An owner MCP query against a cold Neon compute blocks the loop
+for the whole round trip, stalling every concurrent `/api/*` request and
+`/health` — the exact failure the API-side fix was meant to remove. At two users
+this is a latency wart, not an outage.
+
+**Fix.** Make each tool `async def` and `await run_in_threadpool(...)` around the
+store calls, or wrap the bodies in `anyio.to_thread.run_sync`. Ten small edits;
+none of them touch the `/mcp` mount path, its no-auth posture, or any tool
+signature, so §5.1 is not engaged. Worth doing next time the MCP surface is open
+for other reasons rather than on its own.
+
+## 3. Neon's restore window has never been recorded or rehearsed
 
 **Filed 2026-08-11.** Priority: medium — this is the only item here that could
 cost real data.

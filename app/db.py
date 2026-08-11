@@ -164,7 +164,19 @@ class Database:
             except BaseException:
                 conn.rollback()
                 raise
-        self._apply_hardening()
+        failed = self._apply_hardening()
+        if failed:
+            # the constraint's whole value is turning silent corruption into a
+            # loud error; if it could not be applied, that must not itself be
+            # silent. One line per startup, greppable in the Cloud Run logs.
+            import sys
+
+            print(
+                f"WARNING: {len(failed)} constraint(s) in db/hardening.sql are "
+                "NOT in force — the audit-order guarantee is unprotected until "
+                "the underlying data is repaired",
+                file=sys.stderr,
+            )
 
     def _apply_hardening(self, path: Path | str = _HARDENING_PATH) -> list[str]:
         """Apply db/hardening.sql best-effort; return the statements that failed.
@@ -175,17 +187,22 @@ class Database:
         refuses to start. Each statement gets its own transaction so one
         failure does not roll back the others.
         """
+        import sys
+
         path = Path(path)
-        if not path.exists():
+        try:
+            statements = _sql_statements(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            # reading/parsing the file is part of "best effort" too — a missing
+            # or unreadable hardening.sql must not be able to stop the service
+            print(f"WARNING: could not read {path} ({exc})", file=sys.stderr)
             return []
         failed: list[str] = []
-        for statement in _sql_statements(path.read_text(encoding="utf-8")):
+        for statement in statements:
             try:
                 with self.tx() as tx:
                     tx.execute(statement)
             except Exception as exc:
-                import sys
-
                 failed.append(statement)
                 print(
                     f"WARNING: could not apply constraint ({exc}); "

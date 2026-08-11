@@ -14,6 +14,8 @@
 -- same value and both insert it — silently corrupting the audit order that
 -- history() sorts by. Household-scale concurrency makes that very unlikely,
 -- which is exactly why it would go unnoticed; this turns it into a loud error.
--- Verified clean against production (0 duplicate groups) on 2026-08-11.
+-- Operator check on 2026-08-11 found 0 duplicate groups in production, which
+-- is why this could ship as a plain index rather than a repair migration.
+-- That was a point-in-time observation, not a repo-verifiable fact.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_expense_history_expense_seq
   ON expense_history (expense_id, seq);

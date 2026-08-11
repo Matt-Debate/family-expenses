@@ -323,6 +323,27 @@ class AgentErgonomicsTests(unittest.TestCase):
         self.assertEqual([h["action"] for h in hist["history"]], ["create"])
         self.assertTrue(hist["history"][0]["snapshot"]["paid"])
 
+    def test_a_missing_id_coaches_the_agent_at_the_mcp_boundary(self):
+        """docs/BACKLOG.md filed this as reaching *MCP callers* as a bare id.
+
+        The store-level test proves the message exists; only this one proves it
+        survives to the agent. The HTTP path deliberately discards it (404
+        'expense not found'), so nothing else covers this boundary.
+        """
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        for tool, args in (
+            ("expenses_update", {"expense_id": "nope", "amount": "5"}),
+            ("expenses_mark_paid", {"expense_id": "nope"}),
+        ):
+            with self.assertRaises(ToolError) as ctx:
+                run(self.mcp.call_tool(tool, args))
+            message = str(ctx.exception)
+            self.assertIn("nope", message)
+            self.assertIn("expenses_list", message)   # where ids come from
+            self.assertIn("query", message)           # the other way to target
+            self.assertNotIn("KeyError", message)
+
     def test_write_results_carry_unpaid_total_note(self):
         added = self.call("expenses_add", amount="300", description="足球课")
         self.assertIn("unpaid total", added["note"])

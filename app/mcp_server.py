@@ -232,7 +232,7 @@ def build_mcp(store: Store) -> FastMCP:
         expense = store.create(
             date=date or today_str(), amount=amount, description=description,
             category=category, submitted_by=submitted_by,
-            paid=paid, paid_date=(paid_date or today_str()) if paid else None,
+            paid=paid, paid_date=paid_date,
         )
         result = expense.to_dict()
         result["note"] = _summary_note() + _category_note(category)

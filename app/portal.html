@@ -341,9 +341,27 @@
   // current, where the History past/future line falls — used to come from the
   // phone's clock, which can disagree with the server that decides the same
   // things. The device is only the fallback for the first paint.
-  var serverToday = null;
+  var serverToday = null;   // YYYY-MM-DD as of the last successful /api/list
+  var serverTodayAt = 0;    // Date.now() when that arrived
+  function addDays(ymd, n) {
+    // parsed and formatted in UTC on purpose: these are calendar dates, and a
+    // local-time round trip across a DST boundary lands on the wrong day
+    var d = new Date(Date.parse(ymd + "T00:00:00Z") + n * 86400000);
+    return d.getUTCFullYear() + "-" + String(d.getUTCMonth()+1).padStart(2,"0") +
+      "-" + String(d.getUTCDate()).padStart(2,"0");
+  }
   function todayStr() {
-    if (serverToday) return serverToday;
+    if (serverToday) {
+      // Advance it by however long the page has been open. Pinning the
+      // server's answer forever would be worse than trusting the phone: a tab
+      // left open overnight would keep offering yesterday as the payment date
+      // — and an accepted default writes a wrong date into the ledger, which
+      // then lands in the wrong month's paid total.
+      // This reads elapsed time, not the device's absolute date, so a phone
+      // set to the wrong DAY still gets the household's date.
+      var days = Math.floor((Date.now() - serverTodayAt) / 86400000);
+      return days > 0 ? addDays(serverToday, days) : serverToday;
+    }
     var d = new Date();
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
   }
@@ -826,6 +844,7 @@
       summary = j.summary || {};
       if (j.today) {
         serverToday = j.today;
+        serverTodayAt = Date.now();
         // the add form's date defaults to today; correct it if the phone was
         // a day out, but never overwrite a date she has already chosen
         var dateEl = $("date");
@@ -914,10 +933,16 @@
       api("history", {id:id}).then(function (j) {
         hbox.style.display = "block";
         hbox.innerHTML = (j.history || []).map(function (h) {
+          var snap = h.snapshot || {};
+          // an expense can be entered already-paid, which is a single 'create'
+          // entry — without the date it carries, the trail would not say when
+          // the money actually moved
+          var paidOn = (snap.paid && snap.paid_date)
+            ? " · " + esc(STR[lang].act.mark_paid) + " " + esc(snap.paid_date) : "";
           return '<div class="hist">' + esc(String(h.changed_at).replace("T", " ")) + " · " +
             esc(STR[lang].act[h.action] || h.action) +
             (h.changed_by ? " · " + esc(h.changed_by) : "") +
-            " · " + esc(money(h.snapshot && h.snapshot.amount)) + "</div>";
+            " · " + esc(money(snap.amount)) + paidOn + "</div>";
         }).join("") || '<div class="hist">–</div>';
       }).catch(function (e) { toast(e.message); });
     }
@@ -926,6 +951,11 @@
   // ---- init ----
   $("date").value = todayStr();
   $("date").addEventListener("input", function () { this.dataset.touched = "1"; });
+  // coming back to a backgrounded tab re-syncs the date with the server rather
+  // than relying on the elapsed-time estimate in todayStr()
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) refresh();
+  });
   applyLang();
   refresh();
 })();

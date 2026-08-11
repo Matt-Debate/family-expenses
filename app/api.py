@@ -73,17 +73,21 @@ def api_list(store: Store, body: dict) -> tuple[int, dict]:
         since=body.get("since"),
         until=body.get("until"),
     )
+    # read the clock ONCE: computing it separately for the summary and for the
+    # response let a request straddling midnight bucket its rows against one
+    # day and label them with the next
+    today = today_str()
     return 200, {
         "ok": True,
         "expenses": [e.to_dict() for e in expenses],
         # summarize the rows we are actually returning: a filtered list under a
         # whole-ledger headline is a wrong number in the most visible place
-        "summary": store.summarize(expenses),
+        "summary": store.summarize(expenses, today=today),
         # the household's today (APP_TZ), so the page stops asking the phone.
         # The server already decides overdue-ness this way; when the two
         # disagreed — a travelling phone, a wrong clock — a row moved between
         # Due and Upcoming depending on who you asked.
-        "today": today_str(),
+        "today": today,
     }
 
 

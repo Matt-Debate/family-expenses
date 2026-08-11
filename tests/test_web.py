@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -345,7 +348,6 @@ class ServerDecidesTodayTests(unittest.TestCase):
         self.assertNotEqual(east, west)
 
     def test_portal_prefers_the_server_date_over_the_device(self):
-        self.assertIn("if (serverToday) return serverToday;", self.portal)
         self.assertIn("serverToday = j.today;", self.portal)
         # only one `new Date()` may survive — the first-paint fallback inside
         # todayStr(); every other date decision must route through todayStr()
@@ -353,6 +355,86 @@ class ServerDecidesTodayTests(unittest.TestCase):
             self.portal.count("new Date()"), 1,
             "a date decision is still reading the phone's clock directly",
         )
+
+    def test_returning_to_a_backgrounded_tab_resyncs(self):
+        self.assertIn('document.addEventListener("visibilitychange"', self.portal)
+
+
+@unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
+class PortalDateArithmeticTests(unittest.TestCase):
+    """Executes the portal's own date functions instead of grepping for them.
+
+    Every other guarantee about `portal.html` is pinned by a source-string
+    assertion, which is how the first version of this feature shipped a
+    regression: it cached the server's date forever, so a tab left open across
+    midnight kept offering yesterday as the payment date — and an accepted
+    default writes a wrong date into the ledger. A string check cannot observe
+    time passing. This runs the real code.
+    """
+
+    PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+
+    def date_fns(self) -> str:
+        """addDays + todayStr, lifted verbatim from the page."""
+        src = self.PORTAL.read_text(encoding="utf-8")
+        start = src.index("  function addDays(ymd, n) {")
+        end = src.index("  function daysBetween(")
+        block = src[start:end]
+        self.assertIn("function todayStr()", block, "todayStr moved; fix the slice")
+        return block
+
+    def run_js(self, setup: str, expr: str) -> str:
+        script = (
+            "var serverToday = null, serverTodayAt = 0;\n"
+            + self.date_fns()
+            + "\n" + setup + "\nconsole.log(String(" + expr + "));\n"
+        )
+        out = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True, timeout=30
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out.stdout.strip()
+
+    def test_the_date_advances_while_the_page_stays_open(self):
+        """The regression this class exists for: 25 hours later must be the
+        next day, not the day the page happened to load."""
+        setup = (
+            'serverToday = "2026-08-31"; serverTodayAt = 1000000;\n'
+            "Date.now = function () { return 1000000 + 25 * 3600 * 1000; };"
+        )
+        self.assertEqual(self.run_js(setup, "todayStr()"), "2026-09-01")
+
+    def test_the_date_holds_within_the_same_day(self):
+        setup = (
+            'serverToday = "2026-08-31"; serverTodayAt = 1000000;\n'
+            "Date.now = function () { return 1000000 + 23 * 3600 * 1000; };"
+        )
+        self.assertEqual(self.run_js(setup, "todayStr()"), "2026-08-31")
+
+    def test_the_date_rolls_over_a_year_boundary(self):
+        setup = (
+            'serverToday = "2026-12-31"; serverTodayAt = 0;\n'
+            "Date.now = function () { return 26 * 3600 * 1000; };"
+        )
+        self.assertEqual(self.run_js(setup, "todayStr()"), "2027-01-01")
+
+    def test_add_days_is_dst_proof(self):
+        """Parsed and formatted in UTC on purpose: a local-time round trip
+        across a DST boundary lands on the wrong calendar day."""
+        for tz in ("America/New_York", "Europe/London", "Asia/Shanghai"):
+            with self.subTest(tz=tz):
+                out = subprocess.run(
+                    ["node", "-e",
+                     "var serverToday=null, serverTodayAt=0;\n" + self.date_fns()
+                     + '\nconsole.log(addDays("2026-03-07", 1), addDays("2026-11-01", 1));'],
+                    capture_output=True, text=True, timeout=30, env={**os.environ, "TZ": tz},
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertEqual(out.stdout.strip(), "2026-03-08 2026-11-02")
+
+    def test_without_a_server_date_it_falls_back_to_the_device(self):
+        out = self.run_js("Date.now = function () { return 0; };", "todayStr()")
+        self.assertRegex(out, r"^\d{4}-\d{2}-\d{2}$")
 
 
 class HandlersRunOffTheEventLoopTests(unittest.TestCase):
@@ -414,7 +496,10 @@ class ConstraintHardeningTests(unittest.TestCase):
         buf = io.StringIO()
         with redirect_stderr(buf):
             failed = db._apply_hardening()
+        # name the statement, not just the count — otherwise this passes for
+        # the wrong reason the moment hardening.sql gains a second entry
         self.assertEqual(len(failed), 1)
+        self.assertIn("uq_expense_history_expense_seq", failed[0])
         self.assertIn("WARNING", buf.getvalue())
         # and the app still serves
         self.assertEqual(len(store.list()), 1)

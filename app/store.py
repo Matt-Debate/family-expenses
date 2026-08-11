@@ -180,9 +180,13 @@ class Store:
         `currency` has always been stored, and every total — summarize(), the
         portal cards, the charts — adds `amount` without ever consulting it. One
         non-CNY row would therefore make every monetary figure in the app
-        silently wrong. Nothing can write one today (the portal has no currency
-        field and the MCP exposes no parameter), so refusing is free; carrying
-        an exchange rate would be a real feature this household has no use for.
+        silently wrong.
+
+        This guard is not decorative. The portal UI has no currency field and
+        the MCP exposes no parameter, but `/api/submit` and `/api/update` both
+        read `currency` straight out of the request body (app/api.py), so any
+        link holder could reach it. Carrying an exchange rate would be a real
+        feature this household has no use for; refusing is the honest option.
         """
         text = (str(value).strip().upper() if value else "") or cls.CURRENCY
         if text != cls.CURRENCY:
@@ -254,9 +258,12 @@ class Store:
         amount = self._validate_amount(amount)
         currency = self._validate_currency(currency)
         paid = bool(paid)
-        # an expense recorded as already-paid but with no date given was paid
-        # when it came due — that is the only date the caller has actually told us
-        paid_date = self._validate_date(paid_date or date, field="paid_date") if paid else None
+        # An already-paid expense with no payment date was paid today: someone
+        # is telling us about it now. Defaulting to the DUE date instead reads
+        # better until you enter a bill dated next December and it records a
+        # payment four months in the future, landing in the wrong month's total.
+        # One rule, defined here — callers must not layer a second one on top.
+        paid_date = self._validate_date(paid_date or today_str(), field="paid_date") if paid else None
         now = _utc_now_iso()
         expense = Expense(
             id=generate_id(), date=date, amount=amount, currency=currency,

@@ -398,13 +398,23 @@ class BacklogRegressionTests(unittest.TestCase):
         self.store.create(date="2026-08-01", amount=10, description="足球课")
         self.store.create(date="2026-08-02", amount=20, description="100% cotton")
         self.store.create(date="2026-08-03", amount=30, description="a_b test")
+        # a row that genuinely contains a backslash: without it, find("\\")
+        # returning [] is satisfied just as well by an escape clause that
+        # matches nothing at all
+        self.store.create(date="2026-08-04", amount=40, description=r"C:\receipts")
         self.assertEqual(
             [e.description for e in self.store.find("%")], ["100% cotton"]
         )
         self.assertEqual([e.description for e in self.store.find("_")], ["a_b test"])
-        self.assertEqual(self.store.find("\\"), [])
+        self.assertEqual(
+            [e.description for e in self.store.find("\\")], [r"C:\receipts"]
+        )
+        self.assertEqual(
+            [e.description for e in self.store.find(r"C:\re")], [r"C:\receipts"]
+        )
         # the ordinary case must keep working
         self.assertEqual(len(self.store.find("足球")), 1)
+        self.assertEqual(len(self.store.find("")), 4)  # empty query still matches all
 
     # §4 — a bare KeyError reached MCP callers as just the id
     def test_missing_expense_raises_a_coaching_error(self):
@@ -431,9 +441,22 @@ class BacklogRegressionTests(unittest.TestCase):
         self.assertEqual([h.action for h in history], ["create"])
         self.assertTrue(history[0].snapshot["paid"])
 
-    def test_created_paid_without_a_date_defaults_to_the_due_date(self):
-        exp = self.store.create(date="2026-08-01", amount=5, paid=True)
-        self.assertEqual(exp.paid_date, "2026-08-01")
+    def test_created_paid_without_a_date_is_paid_today_not_when_due(self):
+        """Defaulting to the DUE date would record a payment in the future for
+        any bill entered ahead of time, filing it in the wrong month's total."""
+        from app.store import today_str
+
+        exp = self.store.create(date="2099-12-01", amount=5, paid=True)
+        self.assertEqual(exp.paid_date, today_str())
+
+    def test_only_the_store_decides_the_default_payment_date(self):
+        """The MCP used to apply its own today-default on top of the store's,
+        so the two could disagree and the store's rule was unreachable."""
+        src = (
+            Path(__file__).resolve().parent.parent / "app" / "mcp_server.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("paid=paid, paid_date=paid_date,", src)
+        self.assertNotIn("(paid_date or today_str())", src)
 
     # §4 — expense_history.seq had no uniqueness constraint
     def test_history_seq_is_unique_per_expense(self):
@@ -489,6 +512,38 @@ class BacklogRegressionTests(unittest.TestCase):
         from zoneinfo import ZoneInfo
 
         ZoneInfo("Asia/Shanghai")  # raises if tzdata is missing
+
+    def test_the_default_timezone_is_the_households(self):
+        """Nothing else pins the default: switching it to UTC left the suite
+        green while putting the family a day behind after 08:00 CST."""
+        src = (
+            Path(__file__).resolve().parent.parent / "app" / "store.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('os.environ.get("APP_TZ", "Asia/Shanghai")', src)
+
+    def test_an_unusable_timezone_falls_back_loudly(self):
+        """The fallback is correct for a live service but must not be silent —
+        a silent UTC fallback is exactly how this went unnoticed."""
+        import io
+        import os
+        from contextlib import redirect_stderr
+
+        from app.store import today_str
+
+        original = os.environ.get("APP_TZ")
+        buf = io.StringIO()
+        try:
+            os.environ["APP_TZ"] = "Not/AZone"
+            with redirect_stderr(buf):
+                fallback = today_str()
+        finally:
+            if original is None:
+                os.environ.pop("APP_TZ", None)
+            else:
+                os.environ["APP_TZ"] = original
+        self.assertRegex(fallback, r"^\d{4}-\d{2}-\d{2}$")
+        self.assertIn("WARNING", buf.getvalue())
+        self.assertIn("Not/AZone", buf.getvalue())
 
 
 if __name__ == "__main__":
