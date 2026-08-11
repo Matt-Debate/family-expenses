@@ -515,60 +515,6 @@ class PortalDateArithmeticTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         return out.stdout.strip()
 
-    def day_roll_fns(self) -> str:
-        """scheduleDayRoll + the date helpers it schedules against."""
-        src = self.PORTAL.read_text(encoding="utf-8")
-        start = src.index("  var dayTimer = null;")
-        end = src.index("  function daysBetween(")
-        block = src[start:end]
-        self.assertIn("function scheduleDayRoll()", block, "markers moved")
-        return block
-
-    def test_a_repaint_is_scheduled_for_the_household_midnight(self):
-        """renderClasses() recomputes an untouched picker's date — but only
-        when something calls it, and a tab left visible across midnight calls
-        nothing. She then taps ✓上了 at 00:05 on a box still reading yesterday,
-        and yesterday is what gets written. visibilitychange covers a phone; a
-        tablet left awake it does not.
-        """
-        script = """
-var serverToday = "2026-08-31", serverTodayAt = 1000000, resyncing = false;
-var serverMidnightIn = 600, scheduled = null, rendered = 0;
-var refresh = function () {};
-function render() { rendered++; }
-function $() { return {dataset: {}, value: ""}; }
-function clearTimeout() {}
-function setTimeout(fn, ms) { scheduled = ms; return 1; }
-Date.now = function () { return 1000000; };
-""" + self.day_roll_fns() + """
-scheduleDayRoll();
-console.log(JSON.stringify({scheduled: scheduled}));
-"""
-        out = subprocess.run(["node", "-e", script], capture_output=True,
-                             text=True, timeout=30)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        # 600s to midnight, plus the one-second cushion past it
-        self.assertEqual(json.loads(out.stdout)["scheduled"], 601000)
-
-    def test_nothing_is_scheduled_before_the_server_has_spoken(self):
-        """Arming off a guessed date would repaint at the wrong moment."""
-        script = """
-var serverToday = null, serverTodayAt = 0, resyncing = false;
-var serverMidnightIn = null, scheduled = null;
-var refresh = function () {};
-function render() {}
-function $() { return {dataset: {}, value: ""}; }
-function clearTimeout() {}
-function setTimeout(fn, ms) { scheduled = ms; return 1; }
-""" + self.day_roll_fns() + """
-scheduleDayRoll();
-console.log(JSON.stringify({scheduled: scheduled}));
-"""
-        out = subprocess.run(["node", "-e", script], capture_output=True,
-                             text=True, timeout=30)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIsNone(json.loads(out.stdout)["scheduled"])
-
     def test_the_date_rolls_over_at_midnight_not_24h_after_the_response(self):
         """The page loads at 23:50 and she logs a class ten minutes later. On
         elapsed hours alone that is still "yesterday" — and stays yesterday
@@ -1042,7 +988,7 @@ class ClassRowRenderingTests(unittest.TestCase):
 var packages = [{json.dumps(package)}];
 var candidates = [{{"id":"x1","description":"足球课","amount":2200,"date":"2026-08-03","category":"aden-sports"}}];
 var openPkgs = {json.dumps({i: True for i in open_ids})};
-var clsDates = {{}};
+var clsDates = {{}}, clsBusy = {{}};
 function todayStr() {{ return "2026-08-11"; }}
 var lang = "zh";
 var STR = {{zh: {{ev: {{attended:"上了", missed_school:"停课", missed_us:"没去"}}}}}};
@@ -1407,6 +1353,7 @@ function t(k) { return k; }
 function todayStr() { return "2026-08-11"; }
 function confirm(msg) { confirms.push(msg); return confirmed; }
 var pending = false;   // set by a driver to model a request still in flight
+var rejectWith = null; // an Error to fail with: .answered = the server replied
 var held = [];
 function resolveLog() {   // let a held request come back, later than its context
   var fns = held; held = [];
@@ -1416,6 +1363,8 @@ function api(name, body) {
   apiCalls.push({name: name, body: body});
   if (pending) return { then: function (f) { held.push(f); return this; },
                         catch: function () { return this; } };
+  if (rejectWith) return { then: function () { return this; },
+                           catch: function (f) { f(rejectWith); return this; } };
   return { then: function (f) { f({}); return this; },
            catch: function () { return this; } };
 }
@@ -1443,6 +1392,7 @@ $ = function () { return {addEventListener: function (_e, fn) { handlerFn = fn; 
                     "rendered: rendered, apiCalls: apiCalls, "
                     "confirms: confirms, clsDates: clsDates, toasts: toasts, "
                     "picker: dateEl.value, busy: clsBusy, "
+                    "pickerDisabled: !!dateEl.disabled, "
                     "disabled: button.disabled}));\n")
         out = subprocess.run(["node", "-e", script], capture_output=True,
                              text=True, timeout=30)
@@ -1621,6 +1571,34 @@ resolveLog();
         self.assertEqual(state["picker"], "2026-07-09",
                          "the in-flight log reset a date she picked after it")
 
+    def test_a_refusal_from_the_server_releases_the_course(self):
+        """A 400 means the write did not happen — nothing is in doubt, so
+        holding the course would strand her over a typo."""
+        state = self.run_handler(
+            'rejectWith = new Error("bad date"); rejectWith.answered = true;\n'
+            + self.LOG_TAP + self.LOG_TAP)
+        self.assertEqual(len(state["apiCalls"]), 2, "a refused log locked the course")
+
+    def test_a_network_failure_does_NOT_release_the_course(self):
+        """The dangerous half: a rejection with no answer is ambiguous — the
+        insert may have committed and the reply been lost. class_events has no
+        idempotency constraint (BACKLOG §6), so the retry an open lock permits
+        writes a second row and summarize_package counts both. Staying locked
+        costs a reload and is visible; the duplicate is neither.
+        """
+        state = self.run_handler(
+            'rejectWith = new Error("network");\n' + self.LOG_TAP + self.LOG_TAP)
+        self.assertEqual(len(state["apiCalls"]), 1,
+                         "an ambiguous failure allowed a retry that can double-log")
+        self.assertEqual(state["busy"], {"p1": True})
+
+    def test_the_date_cannot_be_changed_while_its_write_is_in_flight(self):
+        """Rather than trying to DETECT a pick made during the request — which
+        a same-value re-pick makes undetectable, by event or by value — the box
+        is closed for the duration."""
+        state = self.run_handler("pending = true;\n" + self.LOG_TAP)
+        self.assertTrue(state["pickerDisabled"], "she can still edit under the write")
+
     def test_the_reset_asks_the_box_not_an_event_counter(self):
         """A counter of `change` events cannot see a re-pick of the value
         already shown — `<input type="date">` fires nothing when the value does
@@ -1774,6 +1752,65 @@ handlerFn(ev);
     def test_declining_the_course_delete_removes_nothing(self):
         state = self.run_handler("confirmed = false;\n" + self.DELPKG_TAP)
         self.assertEqual(state["apiCalls"], [], "Cancel still deleted the course")
+
+
+@unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
+class ApiErrorShapeTests(unittest.TestCase):
+    """Runs the real `api()` helper.
+
+    The class log releases its per-course lock only for a failure the SERVER
+    answered — an unanswered one may have committed and lost its reply, and a
+    retry would double-log. That distinction is made here, by a flag on the
+    error, and the handler tests stub `api()` out entirely: they supply the
+    flag whose production path is the thing in question.
+    """
+
+    PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+
+    def call_api(self, fetch_js: str) -> dict:
+        src = self.PORTAL.read_text(encoding="utf-8")
+        block = src[src.index("  function api(name, body) {"):
+                    src.index("  // ---- i18n ----")]
+        self.assertIn("err.answered", block, "block markers moved")
+        script = f"""
+var TOKEN = "tok";
+function t(k) {{ return k; }}
+var fetch = {fetch_js};
+{block}
+api("classes-log", {{}}).then(
+  function () {{ console.log(JSON.stringify({{outcome: "resolved"}})); }},
+  function (e) {{ console.log(JSON.stringify(
+      {{outcome: "rejected", answered: !!e.answered, msg: String(e.message)}})); }}
+);
+"""
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_a_server_refusal_is_marked_answered(self):
+        result = self.call_api(
+            'function () { return Promise.resolve({ok: false, json: function () {'
+            ' return Promise.resolve({ok: false, error: "bad date"}); }}); }')
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertTrue(result["answered"], "a refusal the server sent is not in doubt")
+        self.assertEqual(result["msg"], "bad date")
+
+    def test_a_network_failure_is_not_marked_answered(self):
+        """The whole point: this one may have committed."""
+        result = self.call_api(
+            'function () { return Promise.reject(new Error("network down")); }')
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertFalse(result["answered"],
+                         "an unanswered failure was treated as a definite one")
+
+    def test_a_body_that_is_not_json_is_not_marked_answered(self):
+        """A proxy's HTML 502 can follow a write that landed."""
+        result = self.call_api(
+            'function () { return Promise.resolve({ok: false, json: function () {'
+            ' return Promise.reject(new SyntaxError("Unexpected token <")); }}); }')
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertFalse(result["answered"])
 
 
 @unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")

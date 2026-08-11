@@ -191,6 +191,11 @@ def build_mcp(store: Store) -> FastMCP:
         status: all|paid|unpaid|overdue. since/until: YYYY-MM-DD.
         .summary describes exactly the rows returned; when a filter is applied
         .ledger_total carries the whole-ledger figures for context."""
+        # read the clock BEFORE selecting rows: the overdue filter inside
+        # find()/list() reads it too, and a call straddling midnight then omits
+        # a newly-overdue row from the rows AND from the summary figure while
+        # labelling the answer with the other day
+        today = today_str()
         if query and str(query).strip():
             # validate before comparing: Store.list() validates these, and a
             # malformed date must coach the caller rather than silently
@@ -199,7 +204,7 @@ def build_mcp(store: Store) -> FastMCP:
                 since = store._validate_date(since, field="since")
             if until:
                 until = store._validate_date(until, field="until")
-            expenses = store.find(query, status=status)
+            expenses = store.find(query, status=status, today=today)
             # find() has no date support; applying the range here keeps
             # since/until meaningful instead of silently ignored
             if since:
@@ -207,11 +212,8 @@ def build_mcp(store: Store) -> FastMCP:
             if until:
                 expenses = [e for e in expenses if e.date <= until]
         else:
-            expenses = store.list(status=status, since=since, until=until)
-        # one clock read for both figures: computed separately, a call
-        # straddling midnight buckets summary and ledger_total against
-        # different days and they stop being comparable
-        today = today_str()
+            expenses = store.list(status=status, since=since, until=until,
+                                  today=today)
         return {
             "expenses": [e.to_dict() for e in expenses],
             # totals for THESE rows — a filtered list beside a whole-ledger

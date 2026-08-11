@@ -168,6 +168,20 @@ above. It was removed. A course whose request never settles now stays locked
 until the page is reloaded, which is visible (the buttons stay disabled) and
 recoverable, and that is the deliberate trade.
 
+**Related, accepted for now.** A tab left VISIBLE across midnight repaints
+nothing, so an untouched class-date box keeps showing yesterday and — the box
+being what gets written — logs yesterday. A `setTimeout` armed for the
+household's midnight was tried and reverted: it re-armed against its own
+expired deadline and became a one-second render loop, refused to arm at all
+when a DST fall-back made the countdown exceed 24h, and misbehaved on a
+backward clock change. The reviewer's judgement, which was taken: the target
+bug is narrow and VISIBLE (the date is on screen and in the success toast),
+`visibilitychange` already covers a phone, and the timer as written was more
+dangerous than the behaviour it corrected. A one-shot midnight callback that
+simply calls `refresh()` and is re-armed only by a fresh server response would
+be the right shape — with a test that actually fires the callback, which the
+reverted one lacked.
+
 **What a real fix looks like.** Either a client-generated event id carried on
 the request and made UNIQUE in the table, so a retry collapses onto the same
 row; or a reconciliation read (`classes_list`) before permitting the retry.

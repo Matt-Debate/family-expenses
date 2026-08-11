@@ -518,6 +518,38 @@ class AgentErgonomicsTests(unittest.TestCase):
         self.assertNotEqual(lines[0], lines[1], f"both packs read alike: {lines}")
         self.assertNotIn("—", lines[0])
 
+    def test_an_overdue_list_reads_the_clock_once(self):
+        """`expenses_list(status='overdue')` selected rows through find()/list()
+        — each reading the clock itself — and only then read `today` for the
+        totals. A call straddling midnight dropped a newly-overdue row from the
+        rows AND from the summary while labelling the answer the other day.
+        This is the owner's path; /api/list was fixed first and this was not.
+        """
+        from datetime import datetime, timezone
+
+        from app import store as store_module
+
+        calls = []
+
+        def counting_clock():
+            calls.append(1)
+            return datetime(2026, 8, 11, 23, 59, 59, tzinfo=timezone.utc)
+
+        real = store_module._household_now
+        store_module._household_now = counting_clock
+        try:
+            for status in ("overdue",):
+                calls.clear()
+                self.call("expenses_list", status=status)
+                self.assertEqual(len(calls), 1,
+                                 f"{status}: clock read {len(calls)} times")
+                calls.clear()
+                self.call("expenses_list", status=status, query="足球")
+                self.assertEqual(len(calls), 1,
+                                 f"{status} by query: clock read {len(calls)} times")
+        finally:
+            store_module._household_now = real
+
     def test_a_retired_course_does_not_take_a_live_one_s_class(self):
         """An archived course is a finished one, and it matched by name like
         any other — so 足球课 retired last term won outright over the running

@@ -559,7 +559,9 @@ class Store:
                 "or overdue (unpaid and past its due date)"
             )
 
-    def find(self, query: str, *, status: str = "all") -> list["Expense"]:
+    def find(
+        self, query: str, *, status: str = "all", today: Optional[str] = None,
+    ) -> list["Expense"]:
         """Case-insensitive substring match on description/category.
 
         Powers natural-language targeting from the MCP ("the football class")
@@ -573,7 +575,9 @@ class Store:
             r"OR LOWER(COALESCE(category,'')) LIKE :q ESCAPE '\')"
         ]
         params: dict[str, Any] = {"q": needle}
-        self._status_clause(status, clauses, params)
+        # same reason as list(): the caller's ONE clock reading has to decide
+        # which rows are overdue and what date the answer is labelled with
+        self._status_clause(status, clauses, params, today=today)
         with self.db.tx() as tx:
             rows = tx.query(
                 f"SELECT {_EXPENSE_COLS} FROM expenses WHERE {' AND '.join(clauses)} "

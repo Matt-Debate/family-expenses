@@ -254,8 +254,33 @@ down: five of six fix waves in this release introduced a defect of their own.
   with the wall-clock arithmetic too. The pre-transition windows are the ones
   that expose it, and both directions are covered now.
 
+### Fixed after the fourth cross-model round — and one thing reverted
+The reviewer was also asked, plainly, whether the machinery added in response to
+earlier rounds was now more risk than the bugs it removed. Its answer was taken
+as given rather than argued with.
+
+- **The lock still released on a network failure**, which is the same unsafe
+  retry as the timer: an unanswered request may have committed and lost its
+  reply. `api()` now marks an error the server *answered*, and the class log
+  releases only for those — a refusal (400) frees the course, an ambiguous
+  failure holds it. Held is visible and costs a reload; a duplicate class event
+  is neither visible nor recoverable.
+- **The midnight repaint timer is REVERTED.** It re-armed against its own
+  expired deadline and became a one-second render loop, refused to arm when a
+  DST fall-back pushed the countdown past 24h, and misbehaved on a backward
+  clock change. Its target bug is narrow and visible, `visibilitychange` covers
+  a phone, and the timer was more dangerous than the behaviour it corrected.
+  Accepted and filed under `BACKLOG.md` §6 with the shape a real fix would take.
+- **`expenses_list(status='overdue')` still read the clock twice** — only
+  `/api/list` had been fixed, and the MCP path is the owner's. `Store.find`
+  takes the shared date now, and the tool reads it before selecting rows.
+- Instead of trying to detect a date change made *during* a write — which a
+  same-value re-pick makes undetectable, by event or by value — **the picker is
+  disabled while its write is in flight**, and a repaint keeps it disabled
+  rather than drawing a live-looking box over a locked course.
+
 ### Tests
-250 → 327, and two review rounds closed three long-standing coverage gaps:
+250 → 332, and two review rounds closed three long-standing coverage gaps:
 **BACKLOG §4 is closed** — both form-submit handlers now run under node, the
 class one (`addClsForm`) and the expense one (`addForm`, live since v0.1 and the
 one that writes money directly). All four mutations §4 named as surviving are
@@ -265,7 +290,7 @@ have a top-level key-parity guard (deleting an English key left the whole suite
 green, and the dialog then reads the literal key), and the whole-course delete
 confirm is driven by a test rather than only its endpoint.
 
-Ninety-one mutations were applied to the new code — the filter deleted,
+Ninety-eight mutations were applied to the new code — the filter deleted,
 the category match made exact, the period box pinned open and pinned shut, the
 cleared field left populated, the picker ignored, a blank date posted as-is, the
 picker tap left toggling, the confirm removed, Cancel ignored, the remembered
