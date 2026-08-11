@@ -395,10 +395,13 @@
   var summary = {};
   var packages = [];    // class tracker, loaded by refreshClasses()
   var openPkgs = {};     // which courses are expanded, across re-renders
-  // the date each course's picker is set to. Logging re-renders the tab, so
-  // without this, backfilling three missed classes from last month means
-  // picking the same date three times. Empty ⇒ today.
+  // The date each open course's picker is set to — pinned by clsDateFor() so
+  // the box on screen and the date a tap posts are the same value, never two
+  // evaluations of `|| todayStr()` taken moments apart. Empty ⇒ today.
   var clsDates = {};
+  // which courses have a log request in flight. Outside the DOM on purpose:
+  // a re-render replaces a disabled button with an enabled one.
+  var clsBusy = {};
   var candidates = [];  // payments not yet tracked by a package
 
   function t(key) { var v = STR[lang][key]; return typeof v === "string" ? v : key; }
@@ -423,6 +426,7 @@
   // things. The device is only the fallback for the first paint.
   var serverToday = null;   // YYYY-MM-DD as of the last successful /api/list
   var serverTodayAt = 0;    // Date.now() when that arrived
+  var serverMidnightIn = null;  // seconds from then to the household's midnight
   var resyncing = false;    // one extrapolation-triggered refetch per page load
   function addDays(ymd, n) {
     // parsed and formatted in UTC on purpose: these are calendar dates, and a
@@ -444,7 +448,16 @@
       // one day and we go ask the server instead — an unbounded extrapolation
       // would put a payment date in the FUTURE, the same wrong-month error
       // arriving from the other side. Bounded to ±1 day either way.
-      var days = Math.floor((Date.now() - serverTodayAt) / 86400000);
+      // Roll over AT midnight, not 24h after the response that told us the
+      // date. Elapsed time alone meant a page opened at 23:50 kept offering
+      // yesterday until 23:50 the NEXT day. The page cannot work this out
+      // itself — a date says nothing about how much of it is left — so the
+      // server sends the seconds remaining alongside it.
+      var elapsed = (Date.now() - serverTodayAt) / 1000;
+      var days = serverMidnightIn === null
+        ? Math.floor(elapsed / 86400)
+        : (elapsed < serverMidnightIn
+             ? 0 : 1 + Math.floor((elapsed - serverMidnightIn) / 86400));
       if (days > 1) {
         days = 1;
         if (!resyncing) { resyncing = true; refresh(); }  // once per page load
@@ -975,13 +988,15 @@
     var keepPayment = sel.value;
     // only payments not already tracked: one payment, one package, or the same
     // money would be counted twice
+    // escaped per value, not once around the concatenation: the guard in
+    // ClassKindParityTests reads it that way, and so does the next person
+    var payLabels = withUnique(candidates.map(function (e) {
+      return esc(e.description || categoryLabel(e) || "–") + " · " +
+        esc(money0(e.amount)) + " · " + esc(e.date);
+    }), candidates.map(function (e) { return e.id; }));
     sel.innerHTML = candidates.length
-      ? candidates.map(function (e) {
-          // escaped per value, not once around the concatenation: the guard in
-          // ClassKindParityTests reads it that way, and so does the next person
-          return '<option value="' + esc(e.id) + '">' +
-            esc(e.description || categoryLabel(e) || "–") + " · " +
-            esc(money0(e.amount)) + " · " + esc(e.date) + "</option>";
+      ? candidates.map(function (e, i) {
+          return '<option value="' + esc(e.id) + '">' + payLabels[i] + "</option>";
         }).join("")
       : '<option value="">' + esc(t("cls_no_payment")) + "</option>";
     if (keepPayment) sel.value = keepPayment;
@@ -992,10 +1007,7 @@
       body.innerHTML = '<div class="empty">' + esc(t("cls_none")) + "</div>";
       return;
     }
-    body.innerHTML = '<div class="sec"><h2>' + esc(t("cls_sec")) + "</h2><span class='tot'>" +
-      esc(packages.length + " " + t("cls_cls")) + "</span></div><div class='list'>" +
-      packages.map(function (p) {
-        var L = clsLine(p);
+    var titles = withUnique(packages.map(function (p) {
         // A per_class pack carries no period label (the form stopped asking),
         // so without the payment behind it two terms of 足球课 render byte for
         // byte the same — and a class logged against the wrong one moves both
@@ -1005,8 +1017,14 @@
         // escaped per value rather than around the ||-chain: `esc()` maps a
         // null to "", so the fallbacks still work, and the P6 guard can see
         // every field is wrapped without having to parse the expression
-        var title = esc(p.name) + " · " + (esc(p.period_label) ||
+        return esc(p.name) + " · " + (esc(p.period_label) ||
           esc(p.expense.description) || esc(p.expense.date));
+      }), packages.map(function (p) { return p.id; }));
+    body.innerHTML = '<div class="sec"><h2>' + esc(t("cls_sec")) + "</h2><span class='tot'>" +
+      esc(packages.length + " " + t("cls_cls")) + "</span></div><div class='list'>" +
+      packages.map(function (p, idx) {
+        var L = clsLine(p);
+        var title = titles[idx];
         var isOpen = !!openPkgs[p.id];
         return '<div class="item' + (isOpen ? " open" : "") + '" data-pkg="' +
           esc(p.id) + '">' +
@@ -1015,20 +1033,25 @@
               esc(L.big) + "</span></div>" +
             '<div class="ex-sub">' + esc(L.sub) + "</div>" +
           '</div><div class="ex-amt">' + esc(L.amt) + "</div></div>" +
-          // the date the buttons below will log against. A phone user was
+          // The date the buttons below will log against. A phone user was
           // being asked to type "2026-08-05" into a prompt(); the picker also
           // gets to say 上课日期 rather than the 到期日 the prompt borrowed.
-          // data-seeded records what today WAS when this row was drawn, so a
-          // tap can tell "she chose this date" from "nobody has touched it" —
-          // a row stays open across re-renders, and across midnight.
+          //
+          // An OPEN row's date is pinned into clsDates here, so the value on
+          // screen and the value a tap posts are one variable rather than two
+          // evaluations of `clsDates[id] || todayStr()` at different moments.
+          // Without that they drift apart in three ways, all silent: across
+          // midnight the box shows yesterday while a tap posts today; and
+          // re-picking the date already displayed fires no `change` event at
+          // all, so her deliberate choice was never recorded.
+          //
           // `for`/`id` rather than wrapping the input: `input { font:inherit }`
           // inside a `label { font-size:.75rem; font-weight:600 }` renders the
           // date tiny, bold and letter-spaced.
           '<div class="clsdate"' + (isOpen ? "" : ' hidden=""') + ">" +
             '<label for="c-date-' + esc(p.id) + '">' + esc(t("cls_date")) +
               '</label><input type="date" class="c-date" id="c-date-' +
-                esc(p.id) + '" value="' +
-                esc(clsDates[p.id] || todayStr()) + '"></div>' +
+                esc(p.id) + '" value="' + esc(clsDateFor(p)) + '"></div>' +
           '<div class="btns"' + (isOpen ? "" : ' hidden=""') + ">" +
             (p.kind === "per_class"
               ? '<button class="pay" data-c="attended">' + esc(t("cls_attend")) + "</button>"
@@ -1054,6 +1077,27 @@
           esc(e.date + " · " + (STR[lang].ev[e.kind] || e.kind)) +
           '">×</button></div>';
     }).join("");
+  }
+
+  function withUnique(labels, ids) {
+    // Two rows that read the same are a wrong-course log waiting to happen —
+    // and the sub-line does not save them, since two terms of one course cost
+    // the same and start at the same count. The id is the only handle unique
+    // by construction (it is what the MCP falls back to as well), so it is
+    // appended ONLY where the visible text actually collides.
+    var n = {};
+    labels.forEach(function (l) { n[l] = (n[l] || 0) + 1; });
+    return labels.map(function (l, i) {
+      return n[l] > 1 ? l + " · " + esc(String(ids[i]).slice(0, 4)) : l;
+    });
+  }
+
+  function clsDateFor(p) {
+    // Pin an open row's date so the box and the tap read ONE value. Only open
+    // rows: a closed row's picker is hidden and unreachable, and pinning every
+    // package would freeze dates she has never looked at.
+    if (openPkgs[p.id] && !clsDates[p.id]) clsDates[p.id] = todayStr();
+    return clsDates[p.id] || todayStr();
   }
 
   function clsKindFields() {
@@ -1090,6 +1134,9 @@
       if (j.today) {
         serverToday = j.today;
         serverTodayAt = Date.now();
+        // set with the date, always: a fresh date beside a stale remaining-
+        // seconds would roll the day over at the wrong moment
+        serverMidnightIn = typeof j.midnight_in === "number" ? j.midnight_in : null;
         // the add form's date defaults to today; correct it if the phone was
         // a day out, but never overwrite a date she has already chosen
         var dateEl = $("date");
@@ -1208,7 +1255,8 @@
       if (gen !== clsGen) return;  // a newer request already answered
       packages = j.packages || [];
       candidates = j.candidates || [];
-      if (j.today) { serverToday = j.today; serverTodayAt = Date.now(); }
+      if (j.today) { serverToday = j.today; serverTodayAt = Date.now();
+        serverMidnightIn = typeof j.midnight_in === "number" ? j.midnight_in : null; }
       renderClasses();
     }).catch(function (e) { toast(e.message); });
   }
@@ -1222,6 +1270,10 @@
     var dateEl = ev.target.closest && ev.target.closest(".c-date");
     var itemEl = ev.target.closest && ev.target.closest("[data-pkg]");
     if (!dateEl || !itemEl) return;
+    // an emptied box is not a date. Put today back in both places rather than
+    // leaving "" to fall through to today at tap time — the box would then
+    // read blank while the tap wrote a date.
+    if (!dateEl.value) dateEl.value = todayStr();
     clsDates[itemEl.getAttribute("data-pkg")] = dateEl.value;
   });
 
@@ -1288,25 +1340,33 @@
     // tap before the refresh lands would reuse it. Unset ⇒ recompute today,
     // which is also what makes a row left open across midnight log today.
     var d = clsDates[id] || todayStr();
-    // a double tap would log the class twice, and on a period package each
-    // extra one claims another class back from the school
-    if (b.disabled) return;
+    // One log at a time PER COURSE, and the lock lives outside the DOM: a
+    // disabled button is replaced by an enabled one the moment anything
+    // re-renders, and it never covered the sibling buttons at all — so 停课
+    // during an in-flight 上了 wrote two events. On a period package each
+    // extra one claims another class back from the school.
+    if (clsBusy[id]) return;
+    clsBusy[id] = true;
     b.disabled = true;
     api("classes-log", {package_id:id, kind:act, date:d})
       .then(function () {
-        // the memory covers picking a date and then re-rendering (a tap on
-        // another row does that). It must NOT outlive the log it was for.
-        // The visible picker is reset with it: renderClasses() would do that,
-        // but refreshClasses() only repaints if its own request succeeds — and
-        // a row showing 7月2日 while the next tap posts today is a UI that
-        // lies about what it is about to write.
-        delete clsDates[id];
-        var dateEl = itemEl.querySelector(".c-date");
-        if (dateEl) dateEl.value = todayStr();
+        // Back to today, in the memory AND in the box, so the next tap cannot
+        // silently reuse this one's date. Not `delete`: refreshClasses()
+        // repaints only if its own request succeeds, and an unpinned open row
+        // would then show one date and post another.
+        // Guarded on `d` because a slow request outlives its own context —
+        // she may have picked the NEXT date while this one was in flight, and
+        // that choice must survive. The box is re-found by id rather than
+        // through the captured row, which a re-render has already detached.
+        if (clsDates[id] === d) {
+          clsDates[id] = todayStr();
+          var live = document.getElementById("c-date-" + id);
+          if (live) live.value = clsDates[id];
+        }
         toast(t("cls_logged") + " · " + d); refreshClasses();
       })
       .catch(function (e) { toast(e.message); })
-      .then(function () { b.disabled = false; });
+      .then(function () { clsBusy[id] = false; b.disabled = false; });
   });
 
   // ---- init ----

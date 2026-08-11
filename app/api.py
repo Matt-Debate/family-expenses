@@ -12,7 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 from .store import (
-    NotFoundError, Store, ValidationError, is_class_category, today_str,
+    NotFoundError, Store, ValidationError, is_class_category,
+    seconds_until_midnight, today_str,
 )
 
 
@@ -90,6 +91,10 @@ def api_list(store: Store, body: dict) -> tuple[int, dict]:
         # disagreed — a travelling phone, a wrong clock — a row moved between
         # Due and Upcoming depending on who you asked.
         "today": today,
+        # …and how much of it is left, so the page can roll the date over AT
+        # midnight rather than 24h after this response. A date alone says
+        # nothing about how much of the day remains.
+        "midnight_in": seconds_until_midnight(),
     }
 
 
@@ -166,7 +171,7 @@ def api_classes_list(store: Store, body: dict) -> tuple[int, dict]:
     ]
     return 200, {
         "ok": True, "packages": packages, "candidates": candidates,
-        "today": today_str(),
+        "today": today_str(), "midnight_in": seconds_until_midnight(),
     }
 
 

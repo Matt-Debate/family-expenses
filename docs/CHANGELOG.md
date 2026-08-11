@@ -160,8 +160,39 @@ JavaScript rather than reading it.
   (P7), and `docs/FEATURE_CONTRACT.md`'s API table now says `classes-list`
   filters only the candidate payments, not the packages.
 
+### Fixed after cross-model review (`/codex-verify`, GPT-5.4)
+Three same-model rounds had already run. A different model family found four
+more, three of which the earlier rounds had looked straight at.
+
+- **The date on screen and the date posted were two separate evaluations of
+  `clsDates[id] || todayStr()`, taken moments apart** — so they could disagree,
+  and did in three ways. The sharpest: re-picking the date the box already
+  shows fires **no `change` event at all**, so her deliberate choice was never
+  recorded and the tap posted today. That is round 2's defect returning through
+  a different mechanism. An open row's date is now *pinned* into `clsDates` by
+  the renderer, making the box and the tap one variable rather than two.
+- **`todayStr()` rolled the date over 24h after the response, not at midnight.**
+  A page opened at 23:50 kept offering yesterday until 23:50 the *next* day —
+  the root cause under every midnight bug this release and v0.9.0 chased. The
+  page cannot work it out from a date, so `/api/list` and `/api/classes-list`
+  now send **`midnight_in`**, the seconds left of the household's day.
+- **In-flight races could duplicate or misdate a class.** The double-tap guard
+  was `b.disabled`, a property of one button node: any re-render replaced it
+  with an enabled one, and it never covered the sibling buttons at all, so 停课
+  during an in-flight ✓上了 wrote two events — and on a period package the
+  second claims another class back from the school. **This is the one finding
+  in the whole release that can move a money figure**, via extra `class_events`
+  reaching `summarize_package`. The lock is now per course and lives outside
+  the DOM. The post-log reset also no longer discards a date she picked while
+  the request was still in flight, and finds the live input by id rather than
+  through a row a re-render has since detached.
+- **Two courses (or two dropdown options) could still read identically** when
+  the payments behind them matched as well — same date, description and amount,
+  which is exactly what two terms bought in one sitting look like. The package
+  id is appended, but only where the visible text actually collides.
+
 ### Tests
-250 → 299, and two review rounds closed three long-standing coverage gaps:
+250 → 316, and two review rounds closed three long-standing coverage gaps:
 **BACKLOG §4 is closed** — both form-submit handlers now run under node, the
 class one (`addClsForm`) and the expense one (`addForm`, live since v0.1 and the
 one that writes money directly). All four mutations §4 named as surviving are
@@ -171,7 +202,7 @@ have a top-level key-parity guard (deleting an English key left the whole suite
 green, and the dialog then reads the literal key), and the whole-course delete
 confirm is driven by a test rather than only its endpoint.
 
-Fifty-seven mutations were applied to the new code — the filter deleted,
+Seventy-one mutations were applied to the new code — the filter deleted,
 the category match made exact, the period box pinned open and pinned shut, the
 cleared field left populated, the picker ignored, a blank date posted as-is, the
 picker tap left toggling, the confirm removed, Cancel ignored, the remembered

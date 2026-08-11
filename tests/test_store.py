@@ -401,6 +401,62 @@ class CodexVerifyRegressionTests(unittest.TestCase):
         self.assertEqual(forward["total"], backward["total"])
 
 
+class HouseholdMidnightTests(unittest.TestCase):
+    """The portal extrapolates `today` from elapsed time while a page is open.
+
+    Elapsed time alone rolls the date over 24h after the response rather than
+    at midnight, so a page loaded at 23:50 kept offering yesterday for almost a
+    whole day. It cannot work that out from a date, so the server sends how
+    much of the day is left.
+    """
+
+    def test_it_is_a_slice_of_one_day_not_a_whole_one(self):
+        from app.store import seconds_until_midnight
+
+        left = seconds_until_midnight()
+        self.assertGreater(left, 0)
+        self.assertLessEqual(left, 86400)
+
+    def test_it_lands_on_tomorrow_and_not_before(self):
+        """The property that matters: adding it to now crosses into the next
+        household day, and one second less does not."""
+        from datetime import timedelta
+
+        from app.store import _household_now, seconds_until_midnight
+
+        now = _household_now()
+        left = seconds_until_midnight()
+        self.assertEqual(
+            (now + timedelta(seconds=left)).strftime("%Y-%m-%d"),
+            (now + timedelta(days=1)).strftime("%Y-%m-%d"),
+        )
+        self.assertEqual(
+            (now + timedelta(seconds=left - 1)).strftime("%Y-%m-%d"),
+            now.strftime("%Y-%m-%d"),
+        )
+
+    def test_it_follows_APP_TZ(self):
+        """A UTC server answering a China household is the reason any of this
+        exists — the remaining seconds must be the household's, not the box's."""
+        import os
+
+        from app.store import seconds_until_midnight
+
+        original = os.environ.get("APP_TZ")
+        try:
+            os.environ["APP_TZ"] = "Asia/Shanghai"
+            shanghai = seconds_until_midnight()
+            os.environ["APP_TZ"] = "America/New_York"
+            new_york = seconds_until_midnight()
+        finally:
+            if original is None:
+                os.environ.pop("APP_TZ", None)
+            else:
+                os.environ["APP_TZ"] = original
+        # the two zones are never on the same clock, so the counts differ
+        self.assertNotEqual(shanghai, new_york)
+
+
 class BacklogRegressionTests(unittest.TestCase):
     """Items filed in docs/BACKLOG.md as known-and-deferred, now closed in v0.9.0.
 

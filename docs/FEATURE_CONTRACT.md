@@ -141,13 +141,13 @@ portal page and the MCP mount.
 
 | endpoint | body (besides `token`) | effect |
 |---|---|---|
-| `/api/list` | `status?: all\|paid\|unpaid\|overdue, since?, until?` | matching expenses + **totals for exactly those rows** (`Store.summarize`) + `today` in `APP_TZ`, so the page never has to ask the device |
+| `/api/list` | `status?: all\|paid\|unpaid\|overdue, since?, until?` | matching expenses + **totals for exactly those rows** (`Store.summarize`) + `today` in `APP_TZ`, so the page never has to ask the device, **and `midnight_in`** (seconds left of that day) so a page left open rolls the date over AT midnight rather than 24h after the response |
 | `/api/submit` | `date, amount, currency?, category?, description?, submitted_by?` | insert + history(`create`) |
 | `/api/update` | `id, fields{date?,amount?,currency?,category?,description?,submitted_by?}, changed_by?` | update + history(`update`) |
 | `/api/mark-paid` | `id, paid, paid_date?, changed_by?` | set paid state + history(`mark_paid`/`unmark_paid`) |
 | `/api/delete` | `id, changed_by?` | delete + history(`delete`, pre-change snapshot) |
 | `/api/history` | `id` | audit trail for one expense |
-| `/api/classes-list` | `include_archived?` | packages with derived totals (ALL of them) + the untracked payments in `store.CLASS_CATEGORIES` only |
+| `/api/classes-list` | `include_archived?` | packages with derived totals (ALL of them) + the untracked payments in `store.CLASS_CATEGORIES` only + `today`/`midnight_in` |
 | `/api/classes-add` | `expense_id, name, kind, class_count, period_label?` | start tracking a course |
 | `/api/classes-log` | `package_id, kind, date?, note?` | record one class (attended / missed_school / missed_us) |
 | `/api/classes-unlog` | `event_id` | take back one logged class |

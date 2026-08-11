@@ -15,7 +15,7 @@ import json
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from math import fsum, isfinite
+from math import ceil, fsum, isfinite
 from typing import Any, Optional
 
 from .db import Database
@@ -167,11 +167,15 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def today_str() -> str:
-    """Today's date in the household's timezone (APP_TZ, default China).
+def _household_now() -> datetime:
+    """Now in the household's timezone (APP_TZ, default China).
 
     Server clocks run UTC; a family in China adding an expense after
-    08:00 CST would otherwise get 'yesterday'.
+    08:00 CST would otherwise get 'yesterday'. Falling back to UTC is the safe
+    move for a live service — but it puts a China household on the wrong day
+    after 08:00 CST, so it must not be silent. `tzdata` is a pinned runtime
+    dependency precisely so that branch stays unreachable;
+    BacklogRegressionTests proves the zone data is present and APP_TZ honoured.
     """
     import os
 
@@ -179,20 +183,42 @@ def today_str() -> str:
     try:
         from zoneinfo import ZoneInfo
 
-        return datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d")
+        return datetime.now(ZoneInfo(tz_name))
     except Exception as exc:
-        # Falling back to UTC is the safe move for a live service — but it puts
-        # a China household on the wrong day after 08:00 CST, so it must not be
-        # silent. `tzdata` is a pinned runtime dependency precisely so this
-        # branch stays unreachable; BacklogRegressionTests proves the zone data
-        # is present and that APP_TZ is honoured.
         import sys
 
         print(
             f"WARNING: APP_TZ={tz_name!r} unusable ({exc!r}); dates fall back to UTC",
             file=sys.stderr,
         )
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return datetime.now(timezone.utc)
+
+
+def seconds_until_midnight() -> int:
+    """Whole seconds from now until the household's next midnight.
+
+    The portal extrapolates `today` from elapsed time while a page stays open.
+    Elapsed time alone rolls the date over 24h after the response rather than
+    at midnight, so a page loaded at 23:50 kept offering yesterday for almost
+    a whole day. It cannot work this out for itself: the server sends a DATE,
+    which says nothing about how much of it is left.
+    """
+    now = _household_now()
+    midnight = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    # ceil, not truncate: int() lands a fraction of a second BEFORE midnight,
+    # so the page would roll the date over that much early
+    return max(1, ceil((midnight - now).total_seconds()))
+
+
+def today_str() -> str:
+    """Today's date in the household's timezone (APP_TZ, default China).
+
+    Server clocks run UTC; a family in China adding an expense after
+    08:00 CST would otherwise get 'yesterday'.
+    """
+    return _household_now().strftime("%Y-%m-%d")
 
 
 # tolerated decoration around spoken/pasted amounts: ¥300, 300块, 1,200元, "300 rmb"

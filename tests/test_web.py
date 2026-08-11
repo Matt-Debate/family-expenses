@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -416,6 +417,19 @@ class ServerDecidesTodayTests(unittest.TestCase):
         self.assertEqual(r.json()["today"], "2026-08-11")
         self.assertEqual(len(calls), 1, f"clock read {len(calls)} times, expected 1")
 
+    def test_the_response_says_how_much_of_today_is_left(self):
+        """Without it the page rolls the date over 24h after the response
+        instead of at midnight — a page opened at 23:50 offers yesterday all
+        the next day. Both endpoints that carry `today` must carry it."""
+        for endpoint in ("list", "classes-list"):
+            with self.subTest(endpoint=endpoint):
+                body = self.client.post(f"/api/{endpoint}",
+                                        json={"token": self.token}).json()
+                self.assertIn("midnight_in", body)
+                self.assertIsInstance(body["midnight_in"], int)
+                self.assertGreater(body["midnight_in"], 0)
+                self.assertLessEqual(body["midnight_in"], 86400)
+
     def test_history_shows_when_an_already_paid_row_was_paid(self):
         """Collapsing create+mark_paid into one entry hid the payment date the
         surviving row carries — the trail stopped saying when money moved."""
@@ -449,6 +463,9 @@ class PortalDateArithmeticTests(unittest.TestCase):
     def run_js(self, setup: str, expr: str) -> str:
         script = (
             "var serverToday = null, serverTodayAt = 0, resyncing = false;\n"
+            # null = the pre-v0.10.1 behaviour (roll over on elapsed hours);
+            # a test that cares about midnight sets it in `setup`
+            "var serverMidnightIn = null;\n"
             "var refresh = function () { throw new Error('unexpected refetch'); };\n"
             + self.date_fns()
             + "\n" + setup + "\nconsole.log(String(" + expr + "));\n"
@@ -458,6 +475,51 @@ class PortalDateArithmeticTests(unittest.TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         return out.stdout.strip()
+
+    def test_the_date_rolls_over_at_midnight_not_24h_after_the_response(self):
+        """The page loads at 23:50 and she logs a class ten minutes later. On
+        elapsed hours alone that is still "yesterday" — and stays yesterday
+        until 23:50 the NEXT day. A date says nothing about how much of it is
+        left, so the server sends the seconds remaining with it.
+        """
+        setup = (
+            'serverToday = "2026-08-31"; serverTodayAt = 1000000;\n'
+            "serverMidnightIn = 600;\n"                       # 23:50 in Shanghai
+            "Date.now = function () { return 1000000 + 601 * 1000; };"
+        )
+        self.assertEqual(self.run_js(setup, "todayStr()"), "2026-09-01")
+
+    def test_midnight_itself_is_already_the_next_day(self):
+        """The boundary, pinned explicitly: at exactly the remaining seconds
+        the day HAS turned. Off by one here is a whole day of classes filed
+        under yesterday."""
+        setup = (
+            'serverToday = "2026-08-31"; serverTodayAt = 1000000;\n'
+            "serverMidnightIn = 600;\n"
+            "Date.now = function () { return 1000000 + 600 * 1000; };"
+        )
+        self.assertEqual(self.run_js(setup, "todayStr()"), "2026-09-01")
+
+    def test_the_date_holds_right_up_to_midnight(self):
+        """The other side of it: one second early is still today, or every
+        evening would file its classes under tomorrow."""
+        setup = (
+            'serverToday = "2026-08-31"; serverTodayAt = 1000000;\n'
+            "serverMidnightIn = 600;\n"
+            "Date.now = function () { return 1000000 + 599 * 1000; };"
+        )
+        self.assertEqual(self.run_js(setup, "todayStr()"), "2026-08-31")
+
+    def test_a_long_evening_session_still_caps_at_one_day(self):
+        """The ±1-day cap is what stops a wrong device clock writing a date
+        into the future; the midnight offset must not slip past it."""
+        setup = (
+            'serverToday = "2026-08-31"; serverTodayAt = 1000000;\n'
+            "serverMidnightIn = 600;\n"
+            "var refetched = 0; refresh = function () { refetched++; };\n"
+            "Date.now = function () { return 1000000 + (600 + 5 * 86400) * 1000; };"
+        )
+        self.assertEqual(self.run_js(setup, "todayStr()"), "2026-09-01")
 
     def test_the_date_advances_while_the_page_stays_open(self):
         """The regression this class exists for: 25 hours later must be the
@@ -947,6 +1009,59 @@ function categoryLabel(e) {{ return e.category || ""; }}
         self.assertIn('<option value="">', html)
         self.assertIn("cls_no_payment", html)
 
+    def test_an_open_row_pins_its_date_so_the_box_and_the_tap_agree(self):
+        """Without the pin, the box shows `clsDates[id] || todayStr()` at render
+        and a tap computes the same expression again later — two evaluations
+        that drift apart across midnight, and that cannot see a re-pick of the
+        date already displayed (no `change` event fires when the value does not
+        change). Pinning makes them one variable."""
+        state = self.render(open_ids=["p1"], read="JSON.stringify(clsDates)")
+        self.assertEqual(json.loads(state), {"p1": "2026-08-11"})
+
+    def test_a_closed_row_is_not_pinned(self):
+        """Its picker is hidden and unreachable; pinning every package would
+        freeze dates she has never looked at."""
+        state = self.render(open_ids=[], read="JSON.stringify(clsDates)")
+        self.assertEqual(json.loads(state), {})
+
+    def test_courses_whose_payments_also_read_alike_get_a_handle(self):
+        """The description fallback fails when it too matches — two terms
+        bought in one sitting share a date, a description AND an amount, and on
+        day one their figures are identical as well. The id is the only handle
+        unique by construction; it appears only where the text collides.
+        """
+        html = self.render(open_ids=[], seed="""
+packages[0].period_label = null;
+packages[1] = JSON.parse(JSON.stringify(packages[0]));
+packages[1].id = "p2deadbeef";
+""")
+        titles = re.findall(r'<div class="ex-desc">(.*?)</div>', html)
+        self.assertEqual(len(titles), 2, html)
+        self.assertNotEqual(titles[0], titles[1], "two courses still read alike")
+
+    def test_a_course_with_no_twin_carries_no_id_noise(self):
+        """The handle is a last resort, not decoration — one course must not
+        wear a hex fragment for no reason."""
+        html = self.render(open_ids=[], seed="packages[0].period_label = null;")
+        titles = re.findall(r'<div class="ex-desc">(.*?)</div>', html)
+        self.assertNotIn("p1", titles[0].split("<span")[0])
+
+    def test_identical_payments_are_told_apart_in_the_dropdown(self):
+        """Picking the wrong option links the course to the wrong money, and
+        that amount is what the whole tracker divides."""
+        html = self.render(
+            open_ids=[],
+            seed="""
+candidates = [
+  {"id":"aaaa1111","description":"足球课","amount":2200,"date":"2026-08-03","category":"aden-sports"},
+  {"id":"bbbb2222","description":"足球课","amount":2200,"date":"2026-08-03","category":"aden-sports"}
+];""",
+            read='nodes["clsExpense"].innerHTML')
+        options = re.findall(r"<option[^>]*>(.*?)</option>", html)
+        self.assertEqual(len(options), 2)
+        self.assertNotEqual(options[0], options[1],
+                            "two payments render the same option text")
+
     def test_two_same_named_courses_do_not_render_identically(self):
         """The shape this release now produces exclusively: the portal stopped
         asking a per-class pack for a period label, and that label was the row's
@@ -1149,7 +1264,12 @@ class ClassTabInteractionTests(unittest.TestCase):
         harness = """
 var openPkgs = {}, logged = [], rendered = 0, apiCalls = [];
 var clsDates = {};   // empty = she has not touched any picker
+var clsBusy = {};
 var PKG = "p1";
+// the log handler re-finds the live picker by id, because a re-render has
+// already replaced the node it captured when the request began
+var document = {getElementById: function (i) {
+  return i === "c-date-" + PKG ? dateEl : null; }};
 function renderClasses() { rendered++; }
 function refreshClasses() { rendered++; }
 var toasts = [];
@@ -1157,8 +1277,16 @@ function toast(m) { toasts.push(String(m)); }
 function t(k) { return k; }
 function todayStr() { return "2026-08-11"; }
 function confirm(msg) { confirms.push(msg); return confirmed; }
+var pending = false;   // set by a driver to model a request still in flight
+var held = [];
+function resolveLog() {   // let a held request come back, later than its context
+  var fns = held; held = [];
+  fns.forEach(function (f) { f({}); });
+}
 function api(name, body) {
   apiCalls.push({name: name, body: body});
+  if (pending) return { then: function (f) { held.push(f); return this; },
+                        catch: function () { return this; } };
   return { then: function (f) { f({}); return this; },
            catch: function () { return this; } };
 }
@@ -1212,24 +1340,49 @@ handlerFn(ev);
 
     def test_a_double_tapped_log_button_only_logs_once(self):
         """One thumb, a laggy connection — on a period package each spurious
-        tap claims another class back from the school."""
-        driver = """
-button._c = "attended";
+        tap claims another class back from the school. `pending` holds the
+        first request open, which is the state the guard exists for."""
+        state = self.run_handler("pending = true;\n" + self.LOG_TAP + self.LOG_TAP)
+        self.assertEqual(len(state["apiCalls"]), 1,
+                         "the in-flight guard did not stop the second tap")
+        self.assertEqual(state["apiCalls"][0]["name"], "classes-log")
+        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-11")
+
+    def test_a_re_render_mid_flight_does_not_unlock_the_course(self):
+        """The old guard was `b.disabled` — a property of one button node. Any
+        re-render replaces that node with an enabled one, so a second tap got
+        through and logged the class twice. The lock has to outlive the DOM.
+        """
+        state = self.run_handler("""
+pending = true;
+""" + self.LOG_TAP + """
+button.disabled = false;   // as a re-render leaves the replacement button
+""" + self.LOG_TAP)
+        self.assertEqual(len(state["apiCalls"]), 1,
+                         "a re-render re-armed the button and logged twice")
+
+    def test_a_sibling_button_cannot_log_during_an_in_flight_log(self):
+        """`b.disabled` covered only the button tapped. Tapping 停课 while ✓上了
+        was in flight wrote two events — and on a period package the second one
+        claims another class back from the school."""
+        state = self.run_handler("pending = true;\n" + self.log_tap("attended")
+                                 + self.log_tap("missed_school"))
+        self.assertEqual([c["body"]["kind"] for c in state["apiCalls"]],
+                         ["attended"], "two events from one course at once")
+
+    @staticmethod
+    def log_tap(kind: str = "attended") -> str:
+        """A tap on one of the three log buttons. Parameterised because a fixed
+        `button._c = "attended"` silently overwrote any kind a driver set
+        before it, so the sibling-button test tapped ✓上了 twice."""
+        return """
+button._c = "%s";
 var ev = {target: {closest: function (sel) {
   if (sel === "[data-pkg]") return itemEl;
   if (sel === "button[data-c]") return button;
   return null; }}, stopPropagation: function () {}};
 handlerFn(ev);
-var before = apiCalls.length;
-button.disabled = true;          // as the first call left it, mid-flight
-handlerFn(ev);
-console.error("second call added " + (apiCalls.length - before));
-"""
-        state = self.run_handler(driver)
-        self.assertEqual(len(state["apiCalls"]), 1,
-                         "the in-flight guard did not stop the second tap")
-        self.assertEqual(state["apiCalls"][0]["name"], "classes-log")
-        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-11")
+""" % kind
 
     LOG_TAP = """
 button._c = "attended";
@@ -1287,7 +1440,10 @@ clsDates[PKG] = "2026-08-10";     // …and she deliberately picked that date
         dates = [c["body"]["date"] for c in state["apiCalls"]]
         self.assertEqual(dates, ["2026-07-02", "2026-08-11"],
                          "the backfill date survived its own log")
-        self.assertEqual(state["clsDates"], {})
+        # back to today in the memory AND the box — not deleted, because an
+        # unpinned open row shows one date and posts another
+        self.assertEqual(state["clsDates"], {"p1": "2026-08-11"})
+        self.assertEqual(state["picker"], "2026-08-11")
 
     def test_the_picker_stops_showing_a_date_that_will_not_be_used(self):
         """`delete clsDates[id]` changes what a tap POSTS; only a re-render
@@ -1327,6 +1483,21 @@ clsDates[PKG] = "2026-07-02";
 clsDates["p2"] = "2026-07-09";
 """ + self.TAP_ROW)
         self.assertEqual(state["clsDates"], {"p2": "2026-07-09"})
+
+    def test_a_date_picked_while_a_log_is_in_flight_survives_it(self):
+        """A slow request outlives its own context. She logs 7月2日, and while
+        it is still going picks 7月9日 for the next one — the reset that
+        follows the first log must not take her newer choice with it."""
+        state = self.run_handler("""
+pending = true;
+clsDates[PKG] = "2026-07-02";
+""" + self.LOG_TAP + """
+clsDates[PKG] = "2026-07-09";   // her next pick, while the first is in flight
+resolveLog();
+""")
+        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-07-02")
+        self.assertEqual(state["clsDates"], {"p1": "2026-07-09"},
+                         "the in-flight log reset a date she picked after it")
 
     def test_the_toast_says_which_date_was_logged(self):
         """The one action here with no confirmation step. Naming the date is
@@ -1372,6 +1543,7 @@ handlerFn(ev);
         block = src[start:src.index('  $("addClsForm")')]
         self.assertIn("clsDates[", block, "block markers moved")
         script = ("var clsDates = {}, handlerFn = null;\n"
+                  'function todayStr() { return "2026-08-11"; }\n'
                   'var $ = function () { return {addEventListener:'
                   " function (_e, fn) { handlerFn = fn; }}; };\n"
                   + block + "\n" + driver
@@ -1391,6 +1563,20 @@ handlerFn({target: {closest: function (sel) {
   return null; }}});
 """)
         self.assertEqual(state, {"p1": "2026-07-02"})
+
+    def test_emptying_the_box_puts_today_back_in_it(self):
+        """A cleared date input reads "". Storing that leaves the box blank
+        while the tap falls through to today — the box then shows one thing and
+        writes another, which is the class of bug this release keeps making."""
+        state = self.remember_date("""
+var dateEl = {value: ""};
+var itemEl = {getAttribute: function (a) { return a === "data-pkg" ? "p1" : null; }};
+handlerFn({target: {closest: function (sel) {
+  if (sel === ".c-date") return dateEl;
+  if (sel === "[data-pkg]") return itemEl;
+  return null; }}});
+""")
+        self.assertEqual(state, {"p1": "2026-08-11"})
 
     def test_a_change_somewhere_else_in_the_row_is_ignored(self):
         """The listener is on the whole tab body, so every input in every course
