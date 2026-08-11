@@ -1185,6 +1185,7 @@ $ = function () { return {addEventListener: function (_e, fn) { handlerFn = fn; 
                   + "\nconsole.log(JSON.stringify({openPkgs: openPkgs, "
                     "rendered: rendered, apiCalls: apiCalls, "
                     "confirms: confirms, clsDates: clsDates, toasts: toasts, "
+                    "picker: dateEl.value, "
                     "disabled: button.disabled}));\n")
         out = subprocess.run(["node", "-e", script], capture_output=True,
                              text=True, timeout=30)
@@ -1287,6 +1288,45 @@ clsDates[PKG] = "2026-08-10";     // …and she deliberately picked that date
         self.assertEqual(dates, ["2026-07-02", "2026-08-11"],
                          "the backfill date survived its own log")
         self.assertEqual(state["clsDates"], {})
+
+    def test_the_picker_stops_showing_a_date_that_will_not_be_used(self):
+        """`delete clsDates[id]` changes what a tap POSTS; only a re-render
+        changes what the row SHOWS — and refreshClasses() repaints solely
+        inside its own `.then`. On a flaky link the row then reads 7月2日
+        permanently while every later tap posts today. The GFW is why this app
+        has no CDN; a request that does not come back is the normal case.
+        """
+        state = self.run_handler("""
+clsDates[PKG] = "2026-07-02";
+dateEl.value = "2026-07-02";   // as her pick left the DOM
+""" + self.LOG_TAP)
+        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-07-02")
+        self.assertEqual(state["picker"], "2026-08-11",
+                         "the row still offers a date the next tap will ignore")
+
+    def test_closing_a_row_drops_a_date_she_did_not_use(self):
+        """The picker is hidden while the row is closed, so an abandoned pick
+        waits out of sight: open, pick 7月2日, close, reopen tomorrow, tap 停课
+        — and it files under 7月2日. The memory is for a re-render caused by
+        ANOTHER row, which closing this one is not.
+        """
+        state = self.run_handler("""
+openPkgs[PKG] = true;
+clsDates[PKG] = "2026-07-02";
+""" + self.TAP_ROW)          # tapping the row itself closes it
+        self.assertEqual(state["openPkgs"], {"p1": False})
+        self.assertEqual(state["clsDates"], {})
+
+    def test_closing_a_row_leaves_the_other_rows_dates_alone(self):
+        """Dropping the intent means dropping THIS row's — the memory exists so
+        a pick survives the re-render that opening another row causes, which is
+        the one job it has."""
+        state = self.run_handler("""
+openPkgs[PKG] = true;
+clsDates[PKG] = "2026-07-02";
+clsDates["p2"] = "2026-07-09";
+""" + self.TAP_ROW)
+        self.assertEqual(state["clsDates"], {"p2": "2026-07-09"})
 
     def test_the_toast_says_which_date_was_logged(self):
         """The one action here with no confirmation step. Naming the date is

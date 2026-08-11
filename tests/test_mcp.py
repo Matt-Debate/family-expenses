@@ -498,6 +498,50 @@ class AgentErgonomicsTests(unittest.TestCase):
         self.assertNotEqual(lines[0], lines[1], f"both packs read alike: {lines}")
         self.assertNotIn("—", lines[0])
 
+    def test_a_retired_course_does_not_take_a_live_one_s_class(self):
+        """An archived course is a finished one, and it matched by name like
+        any other — so 足球课 retired last term won outright over the running
+        one. The write was then unverifiable: classes_list hides archived by
+        default, so the note the agent reads back to the owner does not contain
+        the class it just logged.
+        """
+        self.call("expenses_add", amount="2200", description="足球课 8月")
+        old = self.call("classes_add", name="足球课", class_count=10, query="8月")
+        self.store.update_package(old["id"], fields={"archived": True})
+        self.call("expenses_add", amount="2200", description="足球课 9月")
+        live = self.call("classes_add", name="足球课", class_count=10, query="9月")
+
+        result = self.call("classes_log", kind="attended", query="足球课")
+        self.assertEqual(result.get("id"), live["id"],
+                         "it logged against the course that finished last term")
+
+    def test_two_live_courses_of_one_name_are_still_a_question(self):
+        """Preferring the live one must not become "pick any live one"."""
+        for month in ("8月", "9月"):
+            self.call("expenses_add", amount="2200", description=f"足球课 {month}")
+            self.call("classes_add", name="足球课", class_count=10, query=month)
+
+        result = self.call("classes_log", kind="attended", query="足球课")
+        self.assertEqual(result["matched"], 2)
+        self.assertEqual([c["archived"] for c in result["candidates"]],
+                         [False, False])
+
+    def test_the_candidates_say_which_course_has_been_retired(self):
+        """Without it the agent shows the owner two rows and cannot tell him
+        one of them is last term's."""
+        self.call("expenses_add", amount="2200", description="足球课 7月")
+        old = self.call("classes_add", name="足球课", class_count=10, query="7月")
+        self.store.update_package(old["id"], fields={"archived": True})
+        for month in ("8月", "9月"):  # two live ones, so it has to ask
+            self.call("expenses_add", amount="2200", description=f"足球课 {month}")
+            self.call("classes_add", name="足球课", class_count=10, query=month)
+
+        result = self.call("classes_log", kind="attended", query="足球课")
+        self.assertEqual(result["matched"], 3)
+        self.assertEqual(
+            sorted(c["archived"] for c in result["candidates"]),
+            [False, False, True])
+
     def test_an_archived_course_is_still_reachable_by_the_agent(self):
         """classes_list hides it by default; that must not make it impossible
         to correct a class logged against it."""

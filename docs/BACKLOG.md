@@ -124,7 +124,34 @@ label swapped — are each caught now, as are four on the expense side:
 defaulting to the household's today, a blank description sent as `""` rather
 than NULL, and the category read from the wrong field.
 
-## 5. Twelve live rows carry a category that is not a category
+## 5. `store.find` matches the category column, so a query can hit a row that never mentions it
+
+**Filed 2026-08-11** by the third review round of v0.10.1. Priority: medium —
+it is the same defect class that round fixed on the class side, sitting on the
+tools that move money directly. **Pre-existing and untouched by that release**
+(`store.find` and `_resolve` are unchanged across `57033b8..HEAD`).
+
+`Store.find` matches the query against `description` **or** `category`, and
+`_resolve` in `app/mcp_server.py` resolves on a single match with no tiering
+and no signal about which column produced it. A reviewer demonstrated
+`expenses_mark_paid(query='aden-edu')` marking a 水电 expense paid — the query
+word appears nowhere in its description. Every targeting tool routes through
+it: `expenses_mark_paid`, `expenses_update`, `expenses_delete`, `classes_add`.
+
+**Why it is filed rather than fixed.** v0.10.1 fixed exactly this shape in
+`_resolve_package` — description matches became a weaker tier that never
+resolves alone. The same tiering is the obvious fix here (`description` is the
+primary signal, `category` the fallback, and a category-only match asks). But
+these are the tools that mark paid, edit amounts and delete rows, and this
+release has already had two fix waves whose own fixes were defective. Changing
+the targeting logic of every money tool as the last edit before a deploy is the
+pattern that caused those. It wants its own change and its own review round.
+
+**Watch for:** the fix must keep `expenses_list(query=…)` matching categories —
+searching by bucket is a legitimate read. Only the single-match *resolution*
+used by write tools needs the tier.
+
+## 6. Twelve live rows carry a category that is not a category
 
 **Filed 2026-08-11** while building the v0.10.1 dropdown filter. Priority: low —
 no total is wrong — but it is invisible from inside the code.
@@ -145,7 +172,7 @@ accept free text and stop pretending the canonical list is closed. Do not
 "fix" it by making the store reject unknown categories — that would break the
 MCP's documented behaviour of accepting anything.
 
-## 6. Neon's restore window has never been recorded or rehearsed
+## 7. Neon's restore window has never been recorded or rehearsed
 
 **Filed 2026-08-11.** Priority: medium — this is the only item here that could
 cost real data.

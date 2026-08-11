@@ -147,7 +147,7 @@ portal page and the MCP mount.
 | `/api/mark-paid` | `id, paid, paid_date?, changed_by?` | set paid state + history(`mark_paid`/`unmark_paid`) |
 | `/api/delete` | `id, changed_by?` | delete + history(`delete`, pre-change snapshot) |
 | `/api/history` | `id` | audit trail for one expense |
-| `/api/classes-list` | `include_archived?` | packages with derived totals + the payments not yet tracked |
+| `/api/classes-list` | `include_archived?` | packages with derived totals (ALL of them) + the untracked payments in `store.CLASS_CATEGORIES` only |
 | `/api/classes-add` | `expense_id, name, kind, class_count, period_label?` | start tracking a course |
 | `/api/classes-log` | `package_id, kind, date?, note?` | record one class (attended / missed_school / missed_us) |
 | `/api/classes-unlog` | `event_id` | take back one logged class |

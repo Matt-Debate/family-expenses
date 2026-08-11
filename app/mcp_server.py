@@ -348,8 +348,16 @@ def build_mcp(store: Store) -> FastMCP:
             if text in (p["name"] or "").lower()
             or text in (p["period_label"] or "").lower()
         ]
-        if len(named) == 1:
-            return named[0]["id"], None
+        # An archived course is a finished one, and it is a name match like any
+        # other — so 足球课 retired last term beat the live 足球课 and took the
+        # write, invisibly: classes_list hides archived by default, so the note
+        # the agent reads back does not contain the class it just logged. Same
+        # shape as prefer_unpaid on the expense side.
+        live = [p for p in named if not p["archived"]]
+        if len(live) == 1:
+            return live[0]["id"], None
+        if not live and len(named) == 1:
+            return named[0]["id"], None  # only a retired course matches: still reachable
         # The funding payment is the weaker signal, and only consulted when the
         # course names miss: a per_class pack carries no period label since
         # v0.10.1, so '8月' has nowhere else to match — it lives in
@@ -384,7 +392,11 @@ def build_mcp(store: Store) -> FastMCP:
                  # twice; `created_at` is second-granular, so `started` can too.
                  # `package_id` is the only handle unique by construction.
                  "classes_logged": len(p["events"]),
-                 "started": p["created_at"]}
+                 "started": p["created_at"],
+                 # the one field that separates a finished course from a
+                 # running one — without it the agent shows the owner two rows
+                 # and cannot say "one of these is last term"
+                 "archived": p["archived"]}
                 for p in matches[:8]
             ],
             "hint": (
@@ -455,10 +467,12 @@ def build_mcp(store: Store) -> FastMCP:
         down one at a time; kind='period' for a flat month/semester fee where
         MISSED classes are owed back. The per-class rate is derived from the
         payment (amount ÷ class_count) — do not pass a rate. period_label is
-        free text like '8月' or '秋季学期'. NOTE: the portal's Classes tab only
-        offers payments categorised 'aden-edu' or 'aden-sports', so a course
-        funded by any other category is trackable here but invisible there —
-        expenses_update the category if she should be able to see it."""
+        free text like '8月' or '秋季学期'. NOTE: the portal's Classes tab can
+        only START a course from a payment categorised 'aden-edu' or
+        'aden-sports' — its add form lists no others. A course started HERE from
+        any other category shows up in her tab normally and she can log classes
+        against it, so there is nothing to correct; do not change a payment's
+        category to make one appear."""
         eid, ambiguous = _resolve(expense_id, query, prefer_unpaid=False)
         if ambiguous:
             return ambiguous

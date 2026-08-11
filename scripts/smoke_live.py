@@ -206,6 +206,31 @@ async def exercise_public_mcp(base: str) -> None:
                 assert [h["action"] for h in history["history"]] == [
                     "create", "update", "mark_paid",
                 ]
+
+                # The class tracker, end to end. Until v0.10.1 these three
+                # tools appeared in this script only as names in the inventory
+                # assertion, so a deploy whose Classes tab was entirely broken
+                # still printed PASS. ¥1000 over 3 is the split that does not
+                # divide evenly — the case every class-money defect survived.
+                course = _tool_payload(await session.call_tool("expenses_add", {
+                    "amount": "1000", "description": "[smoke-mcp] 钢琴课",
+                    "category": "aden-edu", "submitted_by": "smoke-mcp",
+                }))
+                package = _tool_payload(await session.call_tool("classes_add", {
+                    "name": "[smoke] 钢琴课", "class_count": "3",
+                    "expense_id": course["id"],
+                }))
+                assert package["summary"]["rate"] == 333.33, package["summary"]
+                logged = _tool_payload(await session.call_tool("classes_log", {
+                    "package_id": package["id"], "kind": "attended",
+                }))
+                s = logged["summary"]
+                assert s["remaining"] == 2, s
+                # the invariant the whole feature rests on: a part is derived
+                # from the total, so the parts cannot sum past what was paid
+                assert round(s["used_amount"] + s["remaining_amount"], 2) == 1000.00, s
+                listed = _tool_payload(await session.call_tool("classes_list", {}))
+                assert any(p["id"] == package["id"] for p in listed["packages"])
             finally:
                 for expense_id in created_ids:
                     await session.call_tool(
@@ -289,6 +314,14 @@ def main() -> int:
             check("public MCP gate", False, f"{type(exc).__name__}: {exc}")
     finally:
         print("5. Cleanup")
+        # packages first: a payment that funds one cannot be deleted, so the
+        # expense sweep below would refuse the course row and leave both behind
+        for package in store.list_packages(include_archived=True):
+            if str(package["name"] or "").startswith("[smoke"):
+                try:
+                    store.delete_package(package["id"])
+                except Exception:
+                    print("  ! could not delete smoke class package — remove it manually")
         if eid:
             try:
                 post(base, "delete", token=token, id=eid, changed_by="smoke")

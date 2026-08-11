@@ -40,7 +40,8 @@ engaged.
   counted in classes, not in months. The box is hidden **and cleared** for that
   kind: a hidden field that still submits what she typed is the exact shape of
   bug this file keeps finding. It costs the row its only disambiguator, which
-  is why the title now falls back to the funding payment's date — see below.
+  is why the title now falls back to the funding payment's description — see
+  below.
 - **Logging a class uses a date picker.** It opened `prompt()` and asked a phone
   user to type `2026-08-05` by hand — under a label that said 到期日, the
   *expense* due date, which is not what a class date is. Now an
@@ -105,8 +106,13 @@ JavaScript rather than reading it.
   ask the user to choose between two identical lines.
 - The category filter only explained itself when it hid *everything*. The form
   label names it always (「哪一笔付款（只显示 Aden 教育 / Aden 运动）」), and
-  `classes_add`'s tool description tells the agent that a course funded by any
-  other category is trackable over MCP but invisible in the portal.
+  `classes_add`'s tool description says the portal can only *start* a course
+  from those two categories. A first draft of that description said such a
+  course was "invisible" in her tab and told the agent to `expenses_update` the
+  category — both false and actively harmful: only `candidates` is filtered
+  (`app/api.py`), `packages` is not, so the course renders and logs normally,
+  and moving a real row between categories would shift it between the Stats
+  KPIs for no reason.
 - Caught while fixing the above, not by a reviewer: wrapping the date input in
   its `<label>` would have rendered it at `.75rem` bold and letter-spaced, since
   `input { font:inherit }`. Paired by `for`/`id` instead.
@@ -117,9 +123,10 @@ JavaScript rather than reading it.
   every field shown, and the disambiguation question the agent is instructed to
   ask had no answer. Candidates now carry the **payment that funds each one**
   (date · description · amount), and `query` matches the payment description as
-  well, so `query='8月'` resolves again — `8月` lives in "Football (8月, 10课)"
-  now that it has nowhere else to live. The owner logs classes through MCP; this
-  would have been his path, not hers.
+  well, so `query='8月'` reaches the right course again — `8月` lives in
+  "Football (8月, 10课)" now that it has nowhere else to live. It comes back as
+  a **question**, never a write: see the wrong-course fix above. The owner logs
+  classes through MCP; this would have been his path, not hers.
 - **Deleting an attendance record asked nothing.** A 12px `×` beside the class
   log, one mis-tap from erasing attendance — and on a period package, from
   handing the school back a class it owed. It now confirms, and the question
@@ -129,8 +136,32 @@ JavaScript rather than reading it.
   inside the row: without a guard, tapping the date box collapsed the controls
   under her thumb before the picker could open.
 
+- **A retired course could take a live one's class.** `classes_log(query=…)`
+  searches archived packages too, so 足球课 from last term — archived — was a
+  name match like any other and won outright over the running one. The write
+  was then unverifiable: `classes_list` hides archived by default, so the note
+  the agent reads back did not contain the class it had just logged. Live
+  courses are preferred now, a retired one is still reachable when nothing live
+  matches, and the candidates carry `archived` so the agent can say which is
+  which. **Pre-existing** — v0.10.0 had it too, and the broken intermediate
+  state of this release masked it by accident.
+- **`classes_add`'s description told an agent to edit a real money row.** It
+  claimed a course funded by another category was "invisible" in her tab and to
+  `expenses_update` the category. Only `candidates` is filtered — `packages` is
+  not — so such a course renders and logs normally, and moving the row would
+  have shifted it between the Stats KPIs for nothing. A P3 channel is an
+  instruction an agent will follow; this one was false in both halves.
+- The post-deploy smoke gate exercised nothing this release changed: the class
+  tools appeared in it only as names in the inventory assertion, so a deploy
+  whose Classes tab was entirely broken still printed PASS. It now runs a full
+  round trip — ¥1,000 over 3 classes, the split that does not divide evenly —
+  and asserts `used + remaining == paid` against the live service.
+- Three doc claims that had gone stale within this same entry are corrected
+  (P7), and `docs/FEATURE_CONTRACT.md`'s API table now says `classes-list`
+  filters only the candidate payments, not the packages.
+
 ### Tests
-250 → 293, and two review rounds closed three long-standing coverage gaps:
+250 → 299, and two review rounds closed three long-standing coverage gaps:
 **BACKLOG §4 is closed** — both form-submit handlers now run under node, the
 class one (`addClsForm`) and the expense one (`addForm`, live since v0.1 and the
 one that writes money directly). All four mutations §4 named as surviving are
@@ -140,7 +171,7 @@ have a top-level key-parity guard (deleting an English key left the whole suite
 green, and the dialog then reads the literal key), and the whole-course delete
 confirm is driven by a test rather than only its endpoint.
 
-Forty-six mutations were applied to the new code — the filter deleted,
+Fifty-seven mutations were applied to the new code — the filter deleted,
 the category match made exact, the period box pinned open and pinned shut, the
 cleared field left populated, the picker ignored, a blank date posted as-is, the
 picker tap left toggling, the confirm removed, Cancel ignored, the remembered

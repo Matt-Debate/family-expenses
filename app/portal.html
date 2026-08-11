@@ -1265,6 +1265,10 @@
       // count as a tap on the row itself — that closed the row underneath her
       if (ev.target.closest && ev.target.closest(".clsdate")) return;
       openPkgs[id] = !openPkgs[id];
+      // a date picked and then abandoned must not wait, hidden, for the next
+      // time this row is opened: closing the row is dropping the intent. The
+      // memory exists for a re-render caused by ANOTHER row, which this is not.
+      if (!openPkgs[id]) delete clsDates[id];
       renderClasses();
       return;
     }
@@ -1292,7 +1296,13 @@
       .then(function () {
         // the memory covers picking a date and then re-rendering (a tap on
         // another row does that). It must NOT outlive the log it was for.
+        // The visible picker is reset with it: renderClasses() would do that,
+        // but refreshClasses() only repaints if its own request succeeds — and
+        // a row showing 7月2日 while the next tap posts today is a UI that
+        // lies about what it is about to write.
         delete clsDates[id];
+        var dateEl = itemEl.querySelector(".c-date");
+        if (dateEl) dateEl.value = todayStr();
         toast(t("cls_logged") + " · " + d); refreshClasses();
       })
       .catch(function (e) { toast(e.message); })
