@@ -10,6 +10,65 @@ Nothing pending. (The block that sat here described `CLAUDE.md` and
 moved into a release entry; `git log` places them and the entries below now
 carry them.)
 
+## [0.10.1] — 2026-08-11
+
+Five things the owner hit within a day of the class tracker going live. All of
+them are the Classes tab; none touches money, the MCP surface, or §5.1.
+
+### Changed
+- **The payment dropdown offers course payments only** — `aden-edu` and
+  `aden-sports` (`store.CLASS_CATEGORIES`). It listed every expense, newest due
+  date first, so twelve monthly living-expense rows dated out to 2027-07-31 sat
+  on top of the four payments that were actually courses. **No date bound was
+  added on top of that**: a course payment falls due in the future all the time,
+  and that is the one most likely to be tracked next. Matching is case- and
+  space-insensitive because `category` is free text and the MCP drifts from the
+  canonical keys — the live ledger holds rows written as `living expenses`. This
+  is a view concern, not a money rule: the store links a package to any expense
+  and MCP `classes_add` still can, which is the escape hatch for a course paid
+  under another key.
+- **The empty dropdown says what it is filtering.** "先在「待付」里记下这笔付款"
+  was going to become a lie the moment every course payment was tracked — the
+  ledger would be full of payments she had already recorded. It now reads
+  "没有可选的付款（只显示 Aden 教育 / Aden 运动）", which is true whether the
+  ledger is empty, whether nothing is in the two categories, or whether every
+  course is already linked, and it names the filter so the dead end explains
+  itself.
+- **A per-class pack is no longer asked for a 周期.** A pack of N classes is
+  counted in classes, not in months. The box is hidden **and cleared** for that
+  kind: a hidden field that still submits what she typed is the exact shape of
+  bug this file keeps finding. Consequence worth knowing: two per-class packs
+  bought for the same course now render under the same title, so the month
+  belongs in the course name (「足球课 8月」).
+- **Logging a class uses a date picker.** It opened `prompt()` and asked a phone
+  user to type `2026-08-05` by hand — under a label that said 到期日, the
+  *expense* due date, which is not what a class date is. Now an
+  `<input type="date">` in the row, labelled 上课日期 / Class date, starting at
+  the household's today, for all three buttons (上了 · 停课 · 没去). The date she
+  picks survives the re-render that each log triggers, so backfilling three
+  missed classes from last month is one date pick rather than three.
+
+### Fixed
+- **Deleting an attendance record asked nothing.** A 12px `×` beside the class
+  log, one mis-tap from erasing attendance — and on a period package, from
+  handing the school back a class it owed. It now confirms, and the question
+  names the record it would remove (`2026-08-05 · 上了`) rather than asking
+  about nothing in particular.
+- The row's tap handler toggles the row shut, and the new date picker lives
+  inside the row: without a guard, tapping the date box collapsed the controls
+  under her thumb before the picker could open.
+
+### Tests
+250 → 268. Thirteen mutations were applied to the new code — the filter deleted,
+the category match made exact, the period box pinned open and pinned shut, the
+cleared field left populated, the picker ignored, a blank date posted as-is, the
+picker tap left toggling, the confirm removed, Cancel ignored, the remembered
+date forgotten, the confirm's subject dropped, and a typo in `CLASS_CATEGORIES`
+— and every one is caught. `ClassPeriodFieldTests` and the extended
+`ClassTabInteractionTests` execute the portal's own JS under node rather than
+grepping its source; the two grep-shaped guards that remain are there because a
+function nothing calls is a no-op the node harness cannot see.
+
 ## [0.10.0] — 2026-08-11
 
 ### Added

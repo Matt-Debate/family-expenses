@@ -128,7 +128,28 @@ the pattern for closing this exists — a handler harness like the one in
 `ClassTabInteractionTests`, driving a submit event with stub form fields. Worth
 doing for both forms at once rather than only the newer one.
 
-## 5. Neon's restore window has never been recorded or rehearsed
+## 5. Twelve live rows carry a category that is not a category
+
+**Filed 2026-08-11** while building the v0.10.1 dropdown filter. Priority: low —
+no total is wrong — but it is invisible from inside the code.
+
+`category` is free text by design (the MCP can write anything), and the twelve
+monthly living-expense rows in production are categorised **`living expenses`**,
+not the canonical `living`. Nothing errors: they count in every total, and the
+Stats tab charts them under the literal string, i.e. in a bucket beside the
+`生活费` one rather than in it. It is exactly the failure `CategoryParityTests`
+was written to prevent between the portal and the store, happening instead
+between an agent and the store.
+
+`is_class_category()` is deliberately forgiving about case and whitespace for
+this reason, but it cannot rescue a genuinely different word. Two options: a
+one-off `UPDATE expenses SET category='living' WHERE category='living expenses'`
+(12 rows, a real write against production, so it needs the owner's go-ahead), or
+accept free text and stop pretending the canonical list is closed. Do not
+"fix" it by making the store reject unknown categories — that would break the
+MCP's documented behaviour of accepting anything.
+
+## 6. Neon's restore window has never been recorded or rehearsed
 
 **Filed 2026-08-11.** Priority: medium — this is the only item here that could
 cost real data.

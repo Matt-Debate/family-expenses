@@ -237,6 +237,16 @@ class CategoryParityTests(unittest.TestCase):
         self.assertIn('fetch("/api/"', html)
         self.assertNotRegex(html, r"if\s*\(\s*!TOKEN\s*\)\s*return")
 
+    def test_the_class_categories_are_real_categories(self):
+        """CLASS_CATEGORIES filters the Classes tab's payment dropdown. A typo
+        in it ('aden-sport') offers nothing and reads as an empty ledger, with
+        no error anywhere to say why."""
+        from app.store import CATEGORY_KEYS, CLASS_CATEGORIES
+
+        for key in CLASS_CATEGORIES:
+            self.assertIn(key, CATEGORY_KEYS,
+                          f"{key!r} is not a category the portal can even write")
+
     def test_borrow_is_the_category_with_arithmetic(self):
         """The portal must special-case exactly the key the store does."""
         from app.store import BORROW_CATEGORY
@@ -645,6 +655,36 @@ class ClassTrackerApiTests(unittest.TestCase):
         ids = [c["id"] for c in self.post("classes-list").json()["candidates"]]
         self.assertEqual(ids, [free], "a tracked payment must not be offered again")
 
+    def test_candidates_offer_only_course_categories(self):
+        """Unfiltered, the dropdown was every expense, newest date first — and
+        the live ledger carries twelve monthly living-expense rows dated out to
+        2027-07-31, which buried the four payments that were actually courses.
+
+        `a_payment` already posts aden-sports, so a test built only on it stays
+        green whether the filter exists or not; the rent row is the whole point.
+        """
+        rent = self.post("submit", date="2027-07-31", amount=22000,
+                         description="Living expenses (2027 8月)",
+                         category="living").json()["expense"]["id"]
+        piano = self.post("submit", date="2026-08-20", amount=3800,
+                          description="Piano", category="aden-edu"
+                          ).json()["expense"]["id"]
+        football = self.a_payment()  # aden-sports
+        ids = [c["id"] for c in self.post("classes-list").json()["candidates"]]
+        self.assertNotIn(rent, ids, "a living-expense row was offered as a course")
+        self.assertEqual(sorted(ids), sorted([piano, football]),
+                         "both course categories must be offered, and only those")
+
+    def test_candidate_categories_are_matched_case_insensitively(self):
+        """`category` is free text and the MCP drifts from the canonical keys —
+        the live ledger holds rows written as 'living expenses'. A payment that
+        silently fails to appear in the dropdown cannot explain itself."""
+        odd = self.post("submit", date="2026-08-20", amount=500,
+                        description="Swim", category=" Aden-Sports "
+                        ).json()["expense"]["id"]
+        ids = [c["id"] for c in self.post("classes-list").json()["candidates"]]
+        self.assertIn(odd, ids)
+
     def test_portal_write_is_attributed_from_the_link_not_the_client(self):
         """Same rule as expenses: the label on the token wins (A8/P4)."""
         eid = self.a_payment()
@@ -818,6 +858,8 @@ class ClassRowRenderingTests(unittest.TestCase):
 var packages = [{json.dumps(package)}];
 var candidates = [{{"id":"x1","description":"足球课","amount":2200,"date":"2026-08-03","category":"aden-sports"}}];
 var openPkgs = {json.dumps({i: True for i in open_ids})};
+var clsDates = {{}};
+function todayStr() {{ return "2026-08-11"; }}
 var lang = "zh";
 var STR = {{zh: {{ev: {{attended:"上了", missed_school:"停课", missed_us:"没去"}}}}}};
 var out = {{}};
@@ -857,6 +899,30 @@ function categoryLabel(e) {{ return e.category || ""; }}
         self.assertIn('class="histbox">', html)
         self.assertIn("2026-08-05", html)         # the class log is rendered
         self.assertIn("data-unlog=", html)        # ...with its remove control
+
+    def test_an_open_row_offers_a_date_picker_starting_at_today(self):
+        """Logging a class used to open prompt() and ask a phone user to type
+        "2026-08-05" by hand — under a label that said 到期日 (due date)."""
+        html = self.render(open_ids=["p1"])
+        self.assertIn('<input type="date" class="c-date" value="2026-08-11">', html)
+        self.assertIn("cls_date", html)   # its own label, not t("due")
+
+    def test_a_closed_row_hides_the_date_picker_with_its_buttons(self):
+        html = self.render(open_ids=[])
+        self.assertIn('class="clsdate" hidden=""', html)
+
+    def test_the_picker_keeps_the_date_she_already_chose(self):
+        """Every log re-renders the tab. Resetting to today here means
+        backfilling three missed classes from last month is three date picks,
+        and the third one silently lands on today if she forgets."""
+        html = self.render(open_ids=["p1"], seed='clsDates = {p1: "2026-07-02"};')
+        self.assertIn('class="c-date" value="2026-07-02"', html)
+
+    def test_removing_a_class_record_carries_what_it_would_remove(self):
+        """The confirm names the row; without this attribute it would ask about
+        nothing in particular, which is not a check at all."""
+        html = self.render(open_ids=["p1"])
+        self.assertIn('data-when="2026-08-05 · 上了"', html)
 
     def test_the_row_renders_the_course_and_its_figures(self):
         html = self.render(open_ids=["p1"])
@@ -1023,8 +1089,7 @@ function refreshClasses() { rendered++; }
 function toast() {}
 function t(k) { return k; }
 function todayStr() { return "2026-08-11"; }
-function prompt() { return "2026-08-05"; }
-function confirm() { return true; }
+function confirm(msg) { confirms.push(msg); return confirmed; }
 function api(name, body) {
   apiCalls.push({name: name, body: body});
   return { then: function (f) { f({}); return this; },
@@ -1032,7 +1097,11 @@ function api(name, body) {
 }
 var button = {disabled: false, getAttribute: function (a) {
   return a === "data-c" ? this._c : null; }, _c: null};
-var itemEl = {getAttribute: function (a) { return a === "data-pkg" ? PKG : null; }};
+// the row's date picker — what the log buttons read instead of prompt()
+var dateEl = {value: "2026-08-05"};
+var itemEl = {getAttribute: function (a) { return a === "data-pkg" ? PKG : null; },
+  querySelector: function (sel) { return sel === ".c-date" ? dateEl : null; }};
+var confirmed = true, confirms = [];
 var $ = function () { return {addEventListener: function () {}}; };
 """
         # the handler is registered via $("classesBody").addEventListener —
@@ -1045,7 +1114,7 @@ $ = function () { return {addEventListener: function (_e, fn) { handlerFn = fn; 
                   + "\n" + driver
                   + "\nconsole.log(JSON.stringify({openPkgs: openPkgs, "
                     "rendered: rendered, apiCalls: apiCalls, "
-                    "disabled: button.disabled}));\n")
+                    "confirms: confirms, disabled: button.disabled}));\n")
         out = subprocess.run(["node", "-e", script], capture_output=True,
                              text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
@@ -1090,6 +1159,113 @@ console.error("second call added " + (apiCalls.length - before));
         self.assertEqual(state["apiCalls"][0]["name"], "classes-log")
         self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-05")
 
+    LOG_TAP = """
+button._c = "attended";
+var ev = {target: {closest: function (sel) {
+  if (sel === "[data-pkg]") return itemEl;
+  if (sel === "button[data-c]") return button;
+  return null; }}, stopPropagation: function () {}};
+handlerFn(ev);
+"""
+
+    def test_the_logged_date_is_the_one_in_the_row_picker(self):
+        """Reading todayStr() instead of the picker ignores what she chose and
+        dates every backfilled class today — a silently wrong class log."""
+        state = self.run_handler('dateEl.value = "2026-07-02";\n' + self.LOG_TAP)
+        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-07-02")
+
+    def test_a_cleared_picker_falls_back_to_today(self):
+        """A date input cleared by hand reads "" — posting that is a 400, and
+        on a phone an empty box is easy to leave behind."""
+        state = self.run_handler('dateEl.value = "";\n' + self.LOG_TAP)
+        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-11")
+
+    def test_opening_the_date_picker_does_not_close_the_row(self):
+        """The picker lives inside the row, and the row's own tap handler
+        toggles it shut — so tapping the date box collapsed the controls
+        underneath her thumb before the picker could open."""
+        state = self.run_handler("""
+openPkgs[PKG] = true;
+var ev = {target: {closest: function (sel) {
+  if (sel === "[data-pkg]") return itemEl;
+  if (sel === ".clsdate") return {};
+  return null; }}, stopPropagation: function () {}};
+handlerFn(ev);
+""")
+        self.assertEqual(state["openPkgs"], {"p1": True}, "the row closed itself")
+
+    UNLOG_TAP = """
+var unlogEl = {getAttribute: function (a) {
+  if (a === "data-unlog") return "e1";
+  if (a === "data-when") return "2026-08-05 · 上了";
+  return null; }};
+var ev = {target: {closest: function (sel) {
+  if (sel === "[data-pkg]") return itemEl;
+  if (sel === "[data-unlog]") return unlogEl;
+  return null; }}, stopPropagation: function () {}};
+handlerFn(ev);
+"""
+
+    def test_removing_a_class_record_asks_first(self):
+        """A 12px × beside the class log, one mis-tap from erasing attendance —
+        and on a period package, from handing the school back a class it owed."""
+        state = self.run_handler(self.UNLOG_TAP)
+        self.assertEqual(len(state["confirms"]), 1, "it deleted without asking")
+        self.assertIn("2026-08-05", state["confirms"][0],
+                      "the question must name the record it would remove")
+        self.assertEqual(state["apiCalls"][0]["name"], "classes-unlog")
+
+    def test_declining_that_question_removes_nothing(self):
+        state = self.run_handler("confirmed = false;\n" + self.UNLOG_TAP)
+        self.assertEqual(state["apiCalls"], [], "Cancel still deleted the record")
+
+
+@unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
+class ClassPeriodFieldTests(unittest.TestCase):
+    """A pack of N classes is counted in classes, not in months, so the Period
+    box has nothing to label there and is hidden — and cleared, because a hidden
+    field that still submits what she typed is exactly the shape of bug this
+    file keeps finding.
+    """
+
+    PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+
+    def state(self, kind: str, typed: str = "8月") -> dict:
+        import json
+
+        src = self.PORTAL.read_text(encoding="utf-8")
+        block = src[src.index("  function clsKindFields() {"):
+                    src.index("  function clsRateHint() {")]
+        self.assertIn("clsPeriodWrap", block, "block markers moved")
+        script = f"""
+var nodes = {{clsKind: {{value: {json.dumps(kind)}}},
+  clsPeriodWrap: {{hidden: false}},
+  clsPeriod: {{value: {json.dumps(typed)}}}}};
+function $(id) {{ return nodes[id]; }}
+{block}
+clsKindFields();
+console.log(JSON.stringify({{hidden: nodes.clsPeriodWrap.hidden,
+  period: nodes.clsPeriod.value}}));
+"""
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_a_per_class_pack_is_offered_no_period_box(self):
+        self.assertTrue(self.state("per_class")["hidden"])
+
+    def test_a_monthly_or_semester_fee_keeps_it(self):
+        """The period IS the thing being bought there — hiding it too would
+        leave 一月 and 二月 as two rows called the same name."""
+        self.assertFalse(self.state("period")["hidden"])
+
+    def test_switching_to_per_class_clears_what_she_already_typed(self):
+        self.assertEqual(self.state("per_class")["period"], "")
+
+    def test_a_visible_period_box_is_left_alone(self):
+        self.assertEqual(self.state("period")["period"], "8月")
+
 
 class ClassKindParityTests(unittest.TestCase):
     """The portal hard-codes the kind strings the store validates against.
@@ -1110,6 +1286,25 @@ class ClassKindParityTests(unittest.TestCase):
         for kind in CLASS_KINDS:
             self.assertIn(f'value="{kind}"', self.portal,
                           f"portal offers no option for package kind {kind!r}")
+
+    def test_the_period_box_and_the_date_picker_are_wired_up(self):
+        """Both behaviours above are functions, and a function nothing calls is
+        a no-op the node harness cannot see: clsKindFields would then only run
+        on a language switch, and a chosen date would never be remembered."""
+        self.assertIn('$("clsKind").addEventListener("change", clsKindFields)',
+                      self.portal)
+        self.assertRegex(  # …and once at startup, so a fresh page opens right
+            self.portal, r"if \(keepKind\) ks\.value = keepKind;\s*\n\s*clsKindFields\(\);")
+        self.assertRegex(  # (?s) inline — assertRegex's third arg is the message
+            self.portal,
+            r'(?s)\$\("classesBody"\)\.addEventListener\("change".*?clsDates\[')
+
+    def test_a_hidden_field_inside_a_form_row_is_actually_hidden(self):
+        """`.row > *` sets flex, and an author rule beat the UA sheet's
+        [hidden]{display:none} once already — every class row showed its
+        Delete button while marked hidden. The Period box sits in a .row."""
+        self.assertIn(".row > [hidden]", self.portal)
+        self.assertRegex(self.portal, r"\.row > \[hidden\][^{]*\{[^}]*display:none")
 
     def test_event_kinds_match_the_store(self):
         from app.store import CLASS_EVENT_KINDS

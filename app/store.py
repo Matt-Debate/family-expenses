@@ -117,10 +117,29 @@ CLASS_KINDS = ("per_class", "period")
 # 'missed_us' is what the household forfeited.
 CLASS_EVENT_KINDS = ("attended", "missed_school", "missed_us")
 _MISSED_EVENT_KINDS = ("missed_school", "missed_us")
+# Which payments the Classes tab offers to link a course to. A view concern,
+# NOT a money rule: the store links a package to any expense and MCP
+# `classes_add` still can, which is the escape hatch for a course paid under
+# some other key. The ledger carries a year of future-dated living-expense
+# rows, and date-ordered they buried the four payments that were actually
+# courses under twelve months of rent.
+CLASS_CATEGORIES = ("aden-edu", "aden-sports")
 # category is nullable, and `category <> 'borrow'` is NULL (not true) for a NULL
 # category, which would silently drop uncategorised rows from every total.
 _NOT_BORROW = "COALESCE(category, '') <> 'borrow'"
 _IS_BORROW = "COALESCE(category, '') = 'borrow'"
+
+
+def is_class_category(category: Optional[str]) -> bool:
+    """Whether a payment's category makes it a course payment.
+
+    Compared case- and space-insensitively because `category` is free text and
+    the MCP demonstrably drifts from the canonical keys — the live ledger holds
+    twelve rows written as 'living expenses' rather than 'living'. A payment
+    that silently fails to appear in the dropdown cannot explain itself, so the
+    match is forgiving about everything except the actual word.
+    """
+    return str(category or "").strip().lower() in CLASS_CATEGORIES
 
 
 class _ConstraintLost(Exception):

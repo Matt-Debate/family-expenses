@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from .store import NotFoundError, Store, ValidationError, today_str
+from .store import (
+    NotFoundError, Store, ValidationError, is_class_category, today_str,
+)
 
 
 _LINK_LABEL = "_link_label"  # set by _guard from the validated token, never the client
@@ -145,15 +147,22 @@ def api_classes_list(store: Store, body: dict) -> tuple[int, dict]:
     packages = store.list_packages(
         include_archived=bool(body.get("include_archived"))
     )
-    # The payments not yet tracked, so the add form can offer them instead of
-    # asking her to retype an amount the ledger already holds. Taken from a
-    # cheap id-only query: calling list_packages again would re-run the join,
-    # re-scan every class event and re-summarize, all to read one column.
+    # The course payments not yet tracked, so the add form can offer them
+    # instead of asking her to retype an amount the ledger already holds. Taken
+    # from a cheap id-only query: calling list_packages again would re-run the
+    # join, re-scan every class event and re-summarize, all to read one column.
+    #
+    # Narrowed to CLASS_CATEGORIES: unfiltered and date-ordered, twelve
+    # future-dated living-expense rows sat on top of the four payments that
+    # were actually courses. No date bound on top of that — a course payment
+    # falls due in the future all the time, and that is the one most likely to
+    # be tracked next.
     linked = store.linked_expense_ids()
     candidates = [
         {"id": e.id, "date": e.date, "amount": e.amount,
          "description": e.description, "category": e.category, "paid": e.paid}
-        for e in store.list(status="all") if e.id not in linked
+        for e in store.list(status="all")
+        if e.id not in linked and is_class_category(e.category)
     ]
     return 200, {
         "ok": True, "packages": packages, "candidates": candidates,

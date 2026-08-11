@@ -138,7 +138,8 @@
   .btns { display:flex; gap:8px; padding:2px 0 12px; }
   /* an author `display` beats the UA sheet's [hidden]{display:none}, so a
      hidden .btns stayed on screen — every class row showed its Delete */
-  .btns[hidden], .histbox[hidden] { display:none; }
+  .btns[hidden], .histbox[hidden], .clsdate[hidden], .row > [hidden] { display:none; }
+  .clsdate label { margin:0 0 2px; }
   .btns button { padding:9px 4px; font-size:.8rem; cursor:pointer;
     border:1px solid var(--rule); border-radius:var(--radius); background:transparent; }
   .btns .pay { color:var(--ok); border-color:var(--ok); font-weight:600; }
@@ -267,7 +268,7 @@
             <label for="clsKind" data-i18n="cls_kind"></label>
             <select id="clsKind"></select>
           </div>
-          <div>
+          <div id="clsPeriodWrap">
             <label for="clsPeriod" data-i18n="cls_period"></label>
             <input id="clsPeriod" type="text" data-i18n-ph="cls_period_ph">
           </div>
@@ -306,12 +307,18 @@
       tab_now:"待付", tab_classes:"课程", tab_history:"记录", tab_stats:"分析",
       cls_add:"添加课程", cls_payment:"哪一笔付款", cls_name:"课程名称",
       cls_count:"课时数", cls_kind:"类型", cls_period:"周期", cls_period_ph:"如 8月",
+      cls_date:"上课日期",  // NOT t("due") — that reads 到期日, which this is not
       cls_save:"添加", cls_kind_per:"按次（一共几节）", cls_kind_period:"按月／学期",
       cls_rate:"每节", cls_left:"剩", cls_used:"已上", cls_cls:"节",
       cls_owed:"欠我们", cls_reclaim:"可退", cls_forfeit:"自己缺",
       cls_attend:"✓ 上了", cls_cancel:"停课", cls_skip:"没去",
-      cls_none:"还没有课程", cls_no_payment:"先在「待付」里记下这笔付款",
-      cls_confirm_del:"删除这个课程和它的上课记录？", cls_over:"超出",
+      cls_none:"还没有课程",
+      // true whether the ledger is empty, whether nothing is in the two course
+      // categories, or whether every course payment is already tracked — and it
+      // names the filter, so the dead end explains itself
+      cls_no_payment:"没有可选的付款（只显示 Aden 教育 / Aden 运动）",
+      cls_confirm_del:"删除这个课程和它的上课记录？",
+      cls_confirm_unlog:"删除这条上课记录？", cls_over:"超出",
       cls_logged:"已记录", cls_capped:"超出上限", cls_sec:"课程", cls_of:"共",
       ev:{ attended:"上了", missed_school:"停课", missed_us:"没去" },
       sec_due:"待付 · 未来30天", sec_paid:"本月已付", sec_lent:"待还我",
@@ -343,12 +350,15 @@
       tab_now:"Due", tab_classes:"Classes", tab_history:"History", tab_stats:"Stats",
       cls_add:"Add a course", cls_payment:"Which payment", cls_name:"Course",
       cls_count:"Classes", cls_kind:"Type", cls_period:"Period", cls_period_ph:"e.g. 8月",
+      cls_date:"Class date",
       cls_save:"Add", cls_kind_per:"Per class (a pack)", cls_kind_period:"Monthly · semester",
       cls_rate:"each", cls_left:"left", cls_used:"attended", cls_cls:"classes",
       cls_owed:"owed to us", cls_reclaim:"reclaimable", cls_forfeit:"we skipped",
       cls_attend:"✓ Attended", cls_cancel:"Cancelled", cls_skip:"We skipped",
-      cls_none:"No courses yet", cls_no_payment:"Record the payment on the Due tab first",
-      cls_confirm_del:"Delete this course and its class log?", cls_over:"over",
+      cls_none:"No courses yet",
+      cls_no_payment:"No payments to link — only Aden · education / Aden · sports are shown",
+      cls_confirm_del:"Delete this course and its class log?",
+      cls_confirm_unlog:"Delete this class record?", cls_over:"over",
       cls_logged:"Logged", cls_capped:"capped, over by", cls_sec:"Courses", cls_of:"of",
       ev:{ attended:"attended", missed_school:"cancelled", missed_us:"skipped" },
       sec_due:"Due · next 30 days", sec_paid:"Paid this month", sec_lent:"Owed to me",
@@ -382,6 +392,10 @@
   var summary = {};
   var packages = [];    // class tracker, loaded by refreshClasses()
   var openPkgs = {};     // which courses are expanded, across re-renders
+  // the date each course's picker is set to. Logging re-renders the tab, so
+  // without this, backfilling three missed classes from last month means
+  // picking the same date three times. Empty ⇒ today.
+  var clsDates = {};
   var candidates = [];  // payments not yet tracked by a package
 
   function t(key) { var v = STR[lang][key]; return typeof v === "string" ? v : key; }
@@ -481,6 +495,7 @@
     ks.innerHTML = '<option value="per_class">' + esc(t("cls_kind_per")) +
       '</option><option value="period">' + esc(t("cls_kind_period")) + "</option>";
     if (keepKind) ks.value = keepKind;
+    clsKindFields();
     render();
   }
   $("langBtn").addEventListener("click", function () {
@@ -987,6 +1002,13 @@
               esc(L.big) + "</span></div>" +
             '<div class="ex-sub">' + esc(L.sub) + "</div>" +
           '</div><div class="ex-amt">' + esc(L.amt) + "</div></div>" +
+          // the date the buttons below will log against. A phone user was
+          // being asked to type "2026-08-05" into a prompt(); the picker also
+          // gets to say 上课日期 rather than the 到期日 the prompt borrowed.
+          '<div class="clsdate"' + (isOpen ? "" : ' hidden=""') + ">" +
+            "<label>" + esc(t("cls_date")) + "</label>" +
+            '<input type="date" class="c-date" value="' +
+              esc(clsDates[p.id] || todayStr()) + '"></div>' +
           '<div class="btns"' + (isOpen ? "" : ' hidden=""') + ">" +
             (p.kind === "per_class"
               ? '<button class="pay" data-c="attended">' + esc(t("cls_attend")) + "</button>"
@@ -1008,8 +1030,19 @@
         esc(STR[lang].ev[e.kind] || e.kind) +
         (e.logged_by ? " · " + esc(e.logged_by) : "") +
         (e.note ? " · " + esc(e.note) : "") +
-        ' <button class="lnk" data-unlog="' + esc(e.id) + '">×</button></div>';
+        ' <button class="lnk" data-unlog="' + esc(e.id) + '" data-when="' +
+          esc(e.date + " · " + (STR[lang].ev[e.kind] || e.kind)) +
+          '">×</button></div>';
     }).join("");
+  }
+
+  function clsKindFields() {
+    // a pack of N classes is counted in classes, not in months, so 周期 has
+    // nothing to label there. Cleared as it goes: a hidden field that still
+    // submits what she typed is the exact shape of bug this file keeps finding.
+    var per = $("clsKind").value === "per_class";
+    $("clsPeriodWrap").hidden = per;
+    if (per) $("clsPeriod").value = "";
   }
 
   function clsRateHint() {
@@ -1162,6 +1195,15 @@
 
   $("clsExpense").addEventListener("change", clsRateHint);
   $("clsCount").addEventListener("input", clsRateHint);
+  $("clsKind").addEventListener("change", clsKindFields);
+
+  // the picker's date outlives the re-render that every log triggers
+  $("classesBody").addEventListener("change", function (ev) {
+    var dateEl = ev.target.closest && ev.target.closest(".c-date");
+    var itemEl = ev.target.closest && ev.target.closest("[data-pkg]");
+    if (!dateEl || !itemEl) return;
+    clsDates[itemEl.getAttribute("data-pkg")] = dateEl.value;
+  });
 
   $("addClsForm").addEventListener("submit", function (ev) {
     ev.preventDefault();
@@ -1187,6 +1229,10 @@
     var unlog = ev.target.closest && ev.target.closest("[data-unlog]");
     if (unlog) {
       ev.stopPropagation();
+      // a 12px × sitting next to the class log, one mis-tap from erasing an
+      // attendance record — and on a period package, from handing the school
+      // back a class it owed. It names the row it would delete.
+      if (!confirm(t("cls_confirm_unlog") + "\n" + unlog.getAttribute("data-when"))) return;
       api("classes-unlog", {event_id: unlog.getAttribute("data-unlog")})
         .then(function () { toast(t("deleted")); refreshClasses(); })
         .catch(function (e) { toast(e.message); });
@@ -1195,6 +1241,9 @@
 
     var b = ev.target.closest && ev.target.closest("button[data-c]");
     if (!b) {  // tapping the row opens its actions and its class log
+      // …but the date picker lives inside the row, and opening it must not
+      // count as a tap on the row itself — that closed the row underneath her
+      if (ev.target.closest && ev.target.closest(".clsdate")) return;
       openPkgs[id] = !openPkgs[id];
       renderClasses();
       return;
@@ -1208,14 +1257,15 @@
         .catch(function (e) { toast(e.message); });
       return;
     }
-    // logging a class asks for the date, defaulting to the household's today
-    var d = prompt(t("due"), todayStr());
-    if (!d) return;
+    // the date comes from the row's picker, which starts at the household's
+    // today. Cleared by hand it reads "" — fall back rather than post a blank.
+    var dateEl = itemEl.querySelector(".c-date");
+    var d = (dateEl && dateEl.value) || todayStr();
     // a double tap would log the class twice, and on a period package each
     // extra one claims another class back from the school
     if (b.disabled) return;
     b.disabled = true;
-    api("classes-log", {package_id:id, kind:act, date:d.trim()})
+    api("classes-log", {package_id:id, kind:act, date:d})
       .then(function () { toast(t("cls_logged")); refreshClasses(); })
       .catch(function (e) { toast(e.message); })
       .then(function () { b.disabled = false; });
