@@ -286,8 +286,16 @@ class Store:
         elif status == "unpaid":
             clauses.append("paid = :paid")
             params["paid"] = False
+        elif status == "overdue":
+            clauses.append("paid = :paid")
+            clauses.append("date < :today")
+            params["paid"] = False
+            params["today"] = today_str()
         elif status not in ("all", None, ""):
-            raise ValidationError(f"invalid status filter: {status!r}")
+            raise ValidationError(
+                f"invalid status filter: {status!r} — use all, paid, unpaid, "
+                "or overdue (unpaid and past its due date)"
+            )
         if since:
             clauses.append("date >= :since")
             params["since"] = self._validate_date(since, field="since")
@@ -327,54 +335,69 @@ class Store:
             )
         return [self._row_to_expense(row) for row in rows]
 
-    def summary(self, *, today: Optional[str] = None) -> dict[str, Any]:
-        """Household totals, split the way the household actually thinks.
+    UPCOMING_WINDOW_DAYS = 30
 
-        Two distinctions the raw paid/unpaid split cannot express:
+    @classmethod
+    def summarize(
+        cls, expenses: list[Expense], *, today: Optional[str] = None
+    ) -> dict[str, Any]:
+        """Totals for exactly the rows handed in — one code path, no second query.
 
-        * **due vs upcoming** — recurring costs (the monthly living payment) are
-          entered months ahead. A bare "unpaid" total would report a year of rent
-          as owed today, which is both wrong and alarming. ``due_now`` counts
-          only what has actually come due.
-        * **expense vs borrow** — see :data:`BORROW_CATEGORY`. Every expense
-          figure here excludes borrows; borrows are reported on their own.
+        This exists because the aggregate MUST agree with the row set beside it.
+        Computing the summary with its own SQL let a filtered list be rendered
+        under a whole-ledger headline: ask "what's owed this month" and get two
+        rows worth ¥5,780 beneath a ¥247,780 total. Deriving both from the same
+        list makes that disagreement unrepresentable.
+
+        Buckets (see also BORROW_CATEGORY):
+          due_now   unpaid expense, due on or before today (includes overdue)
+          upcoming  unpaid expense, due within the next UPCOMING_WINDOW_DAYS —
+                    a window, not "everything future": recurring costs are
+                    entered a year ahead, and a card summing all of them answers
+                    a question nobody asked
+          borrow_*  she fronted it; owed back to her, never household spending
         """
         today = today or today_str()
-        with self.db.tx() as tx:
-            row = tx.query_one(
-                "SELECT COUNT(*) AS count, "
-                "COALESCE(SUM(amount), 0) AS total, "
-                f"COALESCE(SUM(amount) FILTER (WHERE paid AND {_NOT_BORROW}), 0) AS paid, "
-                f"COALESCE(SUM(amount) FILTER (WHERE NOT paid AND {_NOT_BORROW}), 0) AS unpaid, "
-                f"COUNT(*) FILTER (WHERE NOT paid AND {_NOT_BORROW}) AS unpaid_count, "
-                f"COALESCE(SUM(amount) FILTER (WHERE NOT paid AND {_NOT_BORROW} "
-                "  AND date <= :today), 0) AS due_now, "
-                f"COUNT(*) FILTER (WHERE NOT paid AND {_NOT_BORROW} "
-                "  AND date <= :today) AS due_now_count, "
-                f"COALESCE(SUM(amount) FILTER (WHERE NOT paid AND {_NOT_BORROW} "
-                "  AND date > :today), 0) AS upcoming, "
-                f"COUNT(*) FILTER (WHERE NOT paid AND {_NOT_BORROW} "
-                "  AND date > :today) AS upcoming_count, "
-                f"COALESCE(SUM(amount) FILTER (WHERE NOT paid AND {_IS_BORROW}), 0) AS borrow_owed, "
-                f"COUNT(*) FILTER (WHERE NOT paid AND {_IS_BORROW}) AS borrow_owed_count, "
-                f"COALESCE(SUM(amount) FILTER (WHERE paid AND {_IS_BORROW}), 0) AS borrow_repaid "
-                "FROM expenses",
-                {"today": today},
-            )
-        return {
-            "count": int(row["count"]),
-            "total": round(float(row["total"]), 2),
-            "paid": round(float(row["paid"]), 2),
-            "unpaid": round(float(row["unpaid"]), 2),
-            "unpaid_count": int(row["unpaid_count"]),
-            "due_now": round(float(row["due_now"]), 2),
-            "due_now_count": int(row["due_now_count"]),
-            "upcoming": round(float(row["upcoming"]), 2),
-            "upcoming_count": int(row["upcoming_count"]),
-            "borrow_owed": round(float(row["borrow_owed"]), 2),
-            "borrow_owed_count": int(row["borrow_owed_count"]),
-            "borrow_repaid": round(float(row["borrow_repaid"]), 2),
+        horizon = (
+            datetime.strptime(today, "%Y-%m-%d") + timedelta(days=cls.UPCOMING_WINDOW_DAYS)
+        ).strftime("%Y-%m-%d")
+
+        out = {
+            "count": len(expenses),
+            "total": 0.0, "paid": 0.0, "unpaid": 0.0, "unpaid_count": 0,
+            "due_now": 0.0, "due_now_count": 0,
+            "upcoming": 0.0, "upcoming_count": 0,
+            "borrow_owed": 0.0, "borrow_owed_count": 0, "borrow_repaid": 0.0,
         }
+        for e in expenses:
+            amount = float(e.amount or 0)
+            out["total"] += amount
+            if (e.category or "") == BORROW_CATEGORY:
+                if e.paid:
+                    out["borrow_repaid"] += amount
+                else:
+                    out["borrow_owed"] += amount
+                    out["borrow_owed_count"] += 1
+                continue
+            if e.paid:
+                out["paid"] += amount
+                continue
+            out["unpaid"] += amount
+            out["unpaid_count"] += 1
+            if e.date <= today:
+                out["due_now"] += amount
+                out["due_now_count"] += 1
+            elif e.date <= horizon:
+                out["upcoming"] += amount
+                out["upcoming_count"] += 1
+        for key, value in out.items():
+            out[key] = round(value, 2) if isinstance(value, float) else value
+        return out
+
+    def summary(self, *, today: Optional[str] = None) -> dict[str, Any]:
+        """Whole-ledger totals. Callers showing a FILTERED list must use
+        summarize() on those rows instead, or the total contradicts the list."""
+        return self.summarize(self.list(status="all"), today=today)
 
     def history(self, expense_id: str) -> list[HistoryEntry]:
         with self.db.tx() as tx:

@@ -66,11 +66,23 @@ class CreateAndReadTests(unittest.TestCase):
         """Recurring costs are entered months ahead; a bare unpaid total would
         report a year of rent as owed today."""
         self.store.create(date="2026-07-02", amount=245, category="utilities")
-        self.store.create(date="2026-09-01", amount=22000, category="living")
+        self.store.create(date="2026-08-10", amount=22000, category="living")
         s = self.store.summary(today="2026-07-31")
         self.assertEqual(s["due_now"], 245.0)
         self.assertEqual(s["upcoming"], 22000.0)
         self.assertEqual(s["unpaid"], 22245.0)  # both, for anything wanting the whole
+
+    def test_upcoming_is_a_window_not_everything_future(self):
+        """A year of living payments loaded in advance must not pile into the
+        'upcoming' card — it answers 'what is coming', not 'what exists'."""
+        self.store.create(date="2026-08-05", amount=100, category="food")     # +5d
+        self.store.create(date="2026-08-29", amount=200, category="food")     # +29d
+        self.store.create(date="2026-09-30", amount=22000, category="living")  # +61d
+        s = self.store.summary(today="2026-07-31")
+        self.assertEqual(s["upcoming"], 300.0)
+        self.assertEqual(s["upcoming_count"], 2)
+        # still counted as owed overall — it is real money, just not imminent
+        self.assertEqual(s["unpaid"], 22300.0)
 
     def test_summary_keeps_borrow_out_of_every_expense_figure(self):
         """She fronted the money — repaying her is not household spending."""
@@ -289,3 +301,41 @@ class NaturalInputTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SummaryMatchesTheRowsTests(unittest.TestCase):
+    """The aggregate must describe the rows beside it.
+
+    A filtered list under a whole-ledger headline is a wrong number in the most
+    visible place on the page: two rows worth ¥5,780 beneath a ¥247,780 total.
+    """
+
+    def setUp(self):
+        self.store = make_store()
+        self.store.create(date="2026-08-20", amount=3800, category="aden-edu")
+        self.store.create(date="2026-08-20", amount=1980, category="aden-sports")
+        for month in ("09", "10", "11"):
+            self.store.create(date=f"2026-{month}-01", amount=22000, category="living")
+
+    def test_summarize_describes_only_the_rows_given(self):
+        rows = self.store.list(status="unpaid", since="2026-08-01", until="2026-08-31")
+        s = self.store.summarize(rows, today="2026-08-11")
+        self.assertEqual(s["count"], 2)
+        self.assertEqual(s["total"], 5780.0)
+        self.assertEqual(s["unpaid"], 5780.0)
+        self.assertEqual(s["unpaid_count"], 2)
+
+    def test_whole_ledger_summary_still_sees_everything(self):
+        s = self.store.summary(today="2026-08-11")
+        self.assertEqual(s["count"], 5)
+        self.assertEqual(s["unpaid"], 71780.0)
+
+    def test_overdue_status_filter(self):
+        self.store.create(date="2026-07-01", amount=500, category="utilities")
+        overdue = self.store.list(status="overdue")
+        self.assertEqual([e.date for e in overdue], ["2026-07-01"])
+
+    def test_invalid_status_coaches_the_caller(self):
+        with self.assertRaises(ValidationError) as ctx:
+            self.store.list(status="nope")
+        self.assertIn("overdue", str(ctx.exception))

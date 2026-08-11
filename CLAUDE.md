@@ -30,7 +30,7 @@ annotations. Server `instructions` is bonus, never the only home of a rule.
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 110 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 117 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link
 DATABASE_URL=postgres://… python3 scripts/smoke_live.py --base-url URL  # post-deploy
@@ -82,7 +82,7 @@ fixed a stored XSS in the portal — an unescaped category label reaching
 `innerHTML` which, combined with the unauthenticated `/mcp`, let any caller who
 knew the URL plant markup that exfiltrates her portal token. Live smoke passed
 and A8 was re-verified across the revision change: same URL, `/mcp` still
-header-free, `MCP_SECRET` still unset. The suite is 110 tests.
+header-free, `MCP_SECRET` still unset. The suite is 117 tests.
 
 **Nothing blocks human onboarding now** — Wave 6 in `docs/FIRST_DEPLOY_PLAN.md`
 is cleared and waiting on the five human steps.

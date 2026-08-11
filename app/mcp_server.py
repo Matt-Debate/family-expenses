@@ -166,14 +166,27 @@ def build_mcp(store: Store) -> FastMCP:
         """List expenses AND totals. Use for: '我还要付什么/what do I owe'
         (status='unpaid'), '这个月花了多少/how much did we spend' (read
         .summary), or finding an item ('那个足球的' → query='足球').
-        status: all|paid|unpaid. since/until: YYYY-MM-DD."""
+        status: all|paid|unpaid|overdue. since/until: YYYY-MM-DD.
+        .summary describes exactly the rows returned; when a filter is applied
+        .ledger_total carries the whole-ledger figures for context."""
         if query and str(query).strip():
             expenses = store.find(query, status=status)
+            # find() has no date support; applying the range here keeps
+            # since/until meaningful instead of silently ignored
+            if since:
+                expenses = [e for e in expenses if e.date >= since]
+            if until:
+                expenses = [e for e in expenses if e.date <= until]
         else:
             expenses = store.list(status=status, since=since, until=until)
         return {
             "expenses": [e.to_dict() for e in expenses],
-            "summary": store.summary(),
+            # totals for THESE rows — a filtered list beside a whole-ledger
+            # total is a wrong answer to the question that was asked
+            "summary": store.summarize(expenses),
+            "ledger_total": store.summary() if (query or since or until
+                                                or status not in ("all", None, ""))
+            else None,
         }
 
     @mcp.tool(annotations=_READ)

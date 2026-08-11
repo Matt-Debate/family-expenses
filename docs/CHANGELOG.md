@@ -14,6 +14,44 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: health + portal routes OK.
 
+## [0.8.0] — 2026-08-11
+
+### Fixed
+- **The summary described the whole ledger while the list was filtered.** Ask
+  "what's owed this month" and two rows worth ¥5,780 rendered beneath a
+  ¥247,780 headline. `Store.summarize(rows)` now derives totals from exactly the
+  rows returned, and `summary()` is a thin wrapper over it — one code path, so
+  the disagreement is no longer representable. Urgent because she is reading the
+  portal now: the headline is the first thing on the page.
+- **`expenses_list` silently dropped `since`/`until` whenever `query` was set**
+  (`store.find` has no date support), so a date-bounded search quietly returned
+  all time. The range is now applied to the matches.
+- **Portal writes carried no author.** The form deliberately does not ask — one
+  person types into it — but with two people writing to one ledger, "an expense
+  exists" and "who logged it" are different facts. Writes are now stamped with
+  the link's label, taken from the validated token row and never from the
+  client, so it cannot be spoofed. Applies to edits and deletes too.
+- **Removed the demo backend that arrived with the design handoff.**
+  `if (!TOKEN) return demoApi(...)` never fired in production — the portal is
+  only served at `/t/<token>` — but a ledger that silently accepts writes into
+  an in-memory fake is the worst failure mode available here.
+
+### Changed
+- **`upcoming` is a 30-day window, not everything future.** Twelve months of
+  living payments loaded in advance made the card answer a question nobody
+  asked. Items beyond the window still count in `unpaid`.
+- **History leads with the most recent month.** Scheduled future months were
+  sorting above it — the top of the statement was 2027-07. Past and current
+  months now come first (newest first), with future months in their own
+  "Scheduled" group below. Items within a month are newest-first too.
+- `status="overdue"` (unpaid and past its due date) on both `list` and `find`;
+  the invalid-status error names it.
+
+### Tests
+- Suite 111 → **117**: summary-matches-rows, the upcoming window, the overdue
+  filter, and two guards that the demo backend cannot return on a future design
+  pass.
+
 ## [0.7.1] — 2026-08-11
 
 ### Fixed

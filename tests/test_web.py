@@ -218,6 +218,22 @@ class CategoryParityTests(unittest.TestCase):
                     f"{lang} is missing a label for category {key!r}",
                 )
 
+    def test_portal_has_no_demo_backend(self):
+        """A design pass arrived carrying the artifact's in-memory demo store,
+        reachable via `if (!TOKEN) return demoApi(...)`. It never fired in
+        production — the portal is only served at /t/<token> — but for a ledger,
+        silently accepting writes into a fake is the worst failure available,
+        so it must not come back on the next handoff.
+        """
+        html = self.PORTAL.read_text(encoding="utf-8")
+        for marker in ("DEMO_EXP", "demoApi", "demoInit", "demoSummary"):
+            self.assertNotIn(marker, html, f"demo scaffolding present: {marker}")
+
+    def test_portal_always_talks_to_the_real_api(self):
+        html = self.PORTAL.read_text(encoding="utf-8")
+        self.assertIn('fetch("/api/"', html)
+        self.assertNotRegex(html, r"if\s*\(\s*!TOKEN\s*\)\s*return")
+
     def test_borrow_is_the_category_with_arithmetic(self):
         """The portal must special-case exactly the key the store does."""
         from app.store import BORROW_CATEGORY

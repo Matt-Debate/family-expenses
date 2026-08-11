@@ -158,6 +158,9 @@
   .stmt td.out { color:var(--due); font-weight:600; }
   .stmt td.zero { color:var(--rule); }
   .stmt tr.mrow { cursor:pointer; }
+  .stmt tr.grp td { padding:16px 0 6px; border-top:0; font-size:.66rem;
+    letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:700; }
+  .stmt tr.mrow.soon td { color:var(--muted); }
   .stmt tr.mrow:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
   .caret { display:inline-block; width:1em; color:var(--muted);
     transition:transform .15s; transform:translateY(-1px); }
@@ -267,6 +270,7 @@
       save:"保存", cancel:"取消", paid_on:"付款日期", confirm_del:"确定删除这条？",
       st_due:"已到期", st_soon:"未到期", st_paid:"已付", st_lent:"我垫付",
       overdue_by:"逾期", days:"天", today:"今天", tomorrow:"明天",
+      scheduled:"已排期",
       month:"月份", txns:"笔数", spent:"已付", outstanding:"未付",
       sec_borrow:"我垫付的", kpi_fronted:"我垫付", kpi_repaid:"已还我",
       kpi_wait:"平均还款", kpi_items:" 笔", kpi_oldest:"最久",
@@ -293,6 +297,7 @@
       save:"Save", cancel:"Cancel", paid_on:"Paid on", confirm_del:"Delete this entry?",
       st_due:"due", st_soon:"upcoming", st_paid:"paid", st_lent:"I lent",
       overdue_by:"overdue", days:"d", today:"today", tomorrow:"tomorrow",
+      scheduled:"Scheduled",
       month:"Month", txns:"Txns", spent:"Paid", outstanding:"Outstanding",
       sec_borrow:"Money I lent", kpi_fronted:"I lent", kpi_repaid:"Repaid to me",
       kpi_wait:"Avg to repay", kpi_items:" items", kpi_oldest:"oldest",
@@ -350,7 +355,6 @@
   }
   function api(name, body) {
     body = body || {}; body.token = TOKEN;
-    if (!TOKEN) return demoApi(name, body);
     return fetch("/api/" + name, {
       method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)
     }).then(function (r) { return r.json().then(function (j) {
@@ -559,7 +563,14 @@
       if (e.paid) by[m].spent += Number(e.amount || 0);
       else by[m].out += Number(e.amount || 0);
     });
-    var rows = Object.keys(by).sort().reverse().map(function (k) { return by[k]; });
+    var thisMonth = todayStr().slice(0, 7);
+    var keys = Object.keys(by).sort();
+    // what has happened, most recent first — the question she actually asks
+    var rows = keys.filter(function (k) { return k <= thisMonth; }).reverse()
+                   .map(function (k) { return by[k]; });
+    // what is merely scheduled, soonest first, kept out of the way below
+    var future = keys.filter(function (k) { return k > thisMonth; })
+                     .map(function (k) { return by[k]; });
     if (!rows.length) { $("historyBody").innerHTML = '<div class="empty">' + esc(t("empty_all")) + "</div>"; return; }
     var anyOut = rows.some(function (r) { return r.out > 0; });
     var cols = anyOut ? 4 : 3;
@@ -584,13 +595,29 @@
         if (!open) return head;
         // due date ascending within the month — reads like a statement
         var items = r.items.slice().sort(function (a, b) {
-          return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+          return a.date > b.date ? -1 : a.date < b.date ? 1 : 0;
         });
         return head +
           '<tr class="drow"><td colspan="' + cols + '">' +
             '<div class="detail">' + listHtml(items) + "</div>" +
           "</td></tr>";
-      }).join("") + "</tbody></table>";
+      }).join("") +
+      (future.length
+        ? '<tr class="grp"><td colspan="' + cols + '">' + esc(t("scheduled")) + "</td></tr>" +
+          future.map(function (r) {
+            return '<tr class="mrow soon" data-month="' + esc(r.m) + '" role="button" tabindex="0">' +
+              '<td><span class="caret">›</span>' + esc(r.m) + "</td>" +
+              '<td class="n">' + esc(String(r.n)) + "</td>" +
+              "<td>" + esc(money0(r.spent)) + "</td>" +
+              (anyOut ? '<td class="' + (r.out ? "out" : "zero") + '">' +
+                (r.out ? esc(money0(r.out)) : "–") + "</td>" : "") + "</tr>" +
+              (openMonths[r.m]
+                ? '<tr class="drow"><td colspan="' + cols + '"><div class="detail">' +
+                  listHtml(r.items.slice().sort(function (a, b) {
+                    return a.date > b.date ? -1 : 1; })) + "</div></td></tr>"
+                : "");
+          }).join("")
+        : "") + "</tbody></table>";
   }
 
   // ---- tab 3: stats ----
@@ -875,65 +902,6 @@
   });
 
   // ---- demo data (no token in URL: design preview only; real links always have /t/<token>) ----
-  var DEMO_EXP = null;
-  function demoInit() {
-    if (DEMO_EXP) return;
-    var now = new Date(), Y = now.getFullYear(), M = now.getMonth(), D = now.getDate(), id = 0;
-    function iso(y, m, d) { var dt = new Date(y, m, d);
-      return dt.getFullYear() + "-" + String(dt.getMonth()+1).padStart(2,"0") + "-" + String(dt.getDate()).padStart(2,"0"); }
-    function mk(date, amount, category, description, paidDate) {
-      return { id:"demo-" + (++id), date:date, amount:amount, category:category,
-        description:description, paid:!!paidDate, paid_date:paidDate || null };
-    }
-    DEMO_EXP = [
-      mk(iso(Y,M,D-2), 286.5, "utilities", "七月水电", null),
-      mk(iso(Y,M,D), 99, "mobile", "手机话费", null),
-      mk(iso(Y,M,D+3), 5200, "aden-edu", "秋季学费第一期", null),
-      mk(iso(Y,M,D+12), 410, "home", "物业费", null),
-      mk(iso(Y,M,D+21), 120, "internet", "宽带", null),
-      mk(iso(Y,M,D-18), 3450, "borrow", "机票（我先付）", null),
-      mk(iso(Y,M,D-5), 620, "borrow", "Aden 球鞋（我先付）", null),
-      mk(iso(Y,M,D-40), 900, "borrow", "上月超市", iso(Y,M,3)),
-      mk(iso(Y,M,2), 1580, "food", "超市采购", iso(Y,M,5)),
-      mk(iso(Y,M,1), 300, "transport", "地铁充值", iso(Y,M,2)),
-      mk(iso(Y,M,6), 800, "aden-sports", "游泳课", iso(Y,M,8))
-    ];
-    var cats = ["food","aden-edu","utilities","transport","entertainment","home","aden-sports","medical"];
-    for (var i = 1; i <= 12; i++) {
-      DEMO_EXP.push(mk(iso(Y,M-i,5), 4000, "living", "生活费", iso(Y,M-i,6)));
-      DEMO_EXP.push(mk(iso(Y,M-i,12), 200 + ((i*733) % 1400), cats[i % cats.length], "", iso(Y,M-i,14)));
-      if (i % 3 === 0) DEMO_EXP.push(mk(iso(Y,M-i,20), 500 + i*40, "borrow", "我垫付", iso(Y,M-i+1,2)));
-    }
-  }
-  function demoSummary() {
-    var today = todayStr(), s = { due_now:0, due_now_count:0, upcoming:0, upcoming_count:0, borrow_owed:0, borrow_owed_count:0 };
-    DEMO_EXP.forEach(function (e) {
-      if (e.paid) return;
-      if (isBorrow(e)) { s.borrow_owed += Number(e.amount); s.borrow_owed_count++; return; }
-      var d = daysBetween(today, e.date);
-      if (d <= 0) { s.due_now += Number(e.amount); s.due_now_count++; }
-      else if (d <= 30) { s.upcoming += Number(e.amount); s.upcoming_count++; }
-    });
-    return s;
-  }
-  function demoApi(name, body) {
-    demoInit();
-    return new Promise(function (resolve) { setTimeout(function () {
-      function find(id) { return DEMO_EXP.filter(function (e) { return e.id === id; })[0]; }
-      if (name === "list") { resolve({ ok:true, expenses:DEMO_EXP.slice(), summary:demoSummary() }); }
-      else if (name === "submit") {
-        DEMO_EXP.push({ id:"demo-n" + Date.now(), date:body.date, amount:body.amount,
-          category:body.category, description:body.description, paid:false, paid_date:null });
-        resolve({ ok:true });
-      } else if (name === "update") { var e = find(body.id); if (e) { for (var k in body.fields) e[k] = body.fields[k]; } resolve({ ok:true }); }
-      else if (name === "delete") { DEMO_EXP = DEMO_EXP.filter(function (e) { return e.id !== body.id; }); resolve({ ok:true }); }
-      else if (name === "mark-paid") { var e2 = find(body.id); if (e2) { e2.paid = !!body.paid; e2.paid_date = body.paid ? (body.paid_date || todayStr()) : null; } resolve({ ok:true }); }
-      else if (name === "history") { var e3 = find(body.id);
-        resolve({ ok:true, history:[{ changed_at: todayStr() + "T09:12", action:"create", changed_by:"demo", snapshot:{ amount: e3 ? e3.amount : 0 } }] }); }
-      else resolve({ ok:true });
-    }, 60); });
-  }
-
   // ---- init ----
   $("date").value = todayStr();
   applyLang();

@@ -14,8 +14,26 @@ from typing import Any
 from .store import Store, ValidationError
 
 
-def _authed(store: Store, body: dict) -> bool:
-    return store.validate_token(body.get("token")) is not None
+_LINK_LABEL = "_link_label"  # set by _guard from the validated token, never the client
+
+
+def _authenticate(store: Store, body: dict) -> bool:
+    """Validate the link and stamp its label onto the request.
+
+    Portal writes carry no author — the form deliberately does not ask, since
+    only one person types into it. But once more than one link is live, "an
+    expense exists" and "who logged it" are different facts, and the audit trail
+    needs the second. The label is taken from the validated token row and
+    overwrites anything the client sent, so it cannot be spoofed.
+    """
+    link = store.validate_token(body.get("token"))
+    body[_LINK_LABEL] = (link or {}).get("label")
+    return link is not None
+
+
+def _author(body: dict, explicit_key: str) -> Any:
+    """An explicit name wins; otherwise fall back to the link's label."""
+    return body.get(explicit_key) or body.get(_LINK_LABEL)
 
 
 def _err(status: int, message: str) -> tuple[int, dict]:
@@ -28,7 +46,7 @@ def _guard(handler):
     def wrapped(store: Store, body: Any) -> tuple[int, dict]:
         if not isinstance(body, dict):
             return _err(400, "invalid request body")
-        if not _authed(store, body):
+        if not _authenticate(store, body):
             return _err(401, "invalid or expired link")
         try:
             return handler(store, body)
@@ -50,7 +68,9 @@ def api_list(store: Store, body: dict) -> tuple[int, dict]:
     return 200, {
         "ok": True,
         "expenses": [e.to_dict() for e in expenses],
-        "summary": store.summary(),
+        # summarize the rows we are actually returning: a filtered list under a
+        # whole-ledger headline is a wrong number in the most visible place
+        "summary": store.summarize(expenses),
     }
 
 
@@ -62,7 +82,7 @@ def api_submit(store: Store, body: dict) -> tuple[int, dict]:
         currency=body.get("currency") or "CNY",
         category=body.get("category"),
         description=body.get("description"),
-        submitted_by=body.get("submitted_by"),
+        submitted_by=_author(body, "submitted_by"),
     )
     return 200, {"ok": True, "expense": expense.to_dict()}
 
@@ -73,7 +93,7 @@ def api_update(store: Store, body: dict) -> tuple[int, dict]:
     if not isinstance(fields, dict):
         raise ValidationError("fields object is required")
     expense = store.update(
-        str(body.get("id")), fields=fields, changed_by=body.get("changed_by")
+        str(body.get("id")), fields=fields, changed_by=_author(body, "changed_by")
     )
     return 200, {"ok": True, "expense": expense.to_dict()}
 
@@ -84,14 +104,14 @@ def api_mark_paid(store: Store, body: dict) -> tuple[int, dict]:
         str(body.get("id")),
         paid=bool(body.get("paid")),
         paid_date=body.get("paid_date"),
-        changed_by=body.get("changed_by"),
+        changed_by=_author(body, "changed_by"),
     )
     return 200, {"ok": True, "expense": expense.to_dict()}
 
 
 @_guard
 def api_delete(store: Store, body: dict) -> tuple[int, dict]:
-    deleted = store.delete(str(body.get("id")), changed_by=body.get("changed_by"))
+    deleted = store.delete(str(body.get("id")), changed_by=_author(body, "changed_by"))
     if not deleted:
         raise KeyError(body.get("id"))
     return 200, {"ok": True}
