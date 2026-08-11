@@ -68,21 +68,41 @@ JavaScript rather than reading it.
 - **The picker's value was decided at render time, not at tap time.** A row
   stays open across re-renders, so one left open across midnight posted
   *yesterday* — the same stale-date bug v0.9.0 had to fix once already, moved
-  from the add form into the class log. The input now carries `data-seeded`
-  (what today was when the row was drawn), and a tap treats the value as a
-  choice only when it differs from that seed; otherwise it recomputes today.
+  from the add form into the class log.
+
+  The first fix for this inferred "she picked a date" by comparing the input to
+  a `data-seeded` attribute, and a second review round showed that comparison is
+  ambiguous by construction: *untouched* and *deliberately picked the date on
+  screen* produce identical DOM, so after midnight her explicit choice of
+  yesterday was silently discarded — and re-picking could not help, because
+  nothing re-renders on a pick. It also read a value that `delete clsDates[id]`
+  does not clear, so a second tap before the refresh landed reused it. **`clsDates`
+  is now the single source of truth**: the change listener is the only writer,
+  the log handler is the only reader, and unset means recompute today. The
+  `data-seeded` attribute is gone.
 - **Two per-class packs rendered byte for byte identical.** `period_label` was
   the row title's only disambiguator, and this release guarantees it is NULL for
   everything the portal creates. A class logged against the wrong 足球课 moves
   both rows' figures while both still look right. The title now falls back to
-  the funding payment's date, and the changelog's "put the month in the name"
-  advice is no longer load-bearing.
-- The `classes_list` note printed `足球课 (—)` for every label-less pack, and
-  the MCP disambiguation `payment` string collapsed to identical text when two
+  the funding payment's **description** — not its date, which two terms bought
+  in one sitting share — and the changelog's "put the month in the name" advice
+  is no longer load-bearing. The same fallback fixes `classes_list`'s note.
+- **`classes_log(query=…)` could log against the wrong course, silently.**
+  Matching the funding payment's description — added earlier in this release so
+  `'8月'` would resolve at all — is weak evidence: the payment for 游泳课 may
+  well read "足球课 8月 (转游泳)". A reviewer demonstrated `query='足球课'`
+  drawing a class off swimming, with no question asked and no `matched` key.
+  Course names and period labels are now the **primary** match; the payment
+  description is consulted only when those miss, and a payment-only match never
+  resolves on its own — it comes back as a question whose hint says the match is
+  the weaker kind.
+- The MCP disambiguation `payment` string collapsed to identical text when two
   terms were bought in one sitting (same date, description and amount — the
-  normal MCP entry path, since `expenses_add` defaults the date to today). The
-  note falls back to the payment date; candidates carry `classes_logged` and
-  `started`, which cannot both match.
+  normal MCP entry path, since `expenses_add` defaults the date to today).
+  Candidates carry `classes_logged` and `started`; `created_at` is only
+  second-granular, so those can match too, and the hint now says plainly that
+  such rows are separable only by `package_id` rather than telling the agent to
+  ask the user to choose between two identical lines.
 - The category filter only explained itself when it hid *everything*. The form
   label names it always (「哪一笔付款（只显示 Aden 教育 / Aden 运动）」), and
   `classes_add`'s tool description tells the agent that a course funded by any
@@ -110,7 +130,14 @@ JavaScript rather than reading it.
   under her thumb before the picker could open.
 
 ### Tests
-250 → 280. Twenty-six mutations were applied to the new code — the filter deleted,
+250 → 289, and two review rounds closed three long-standing coverage gaps:
+`addClsForm`'s submit handler is executed at last (BACKLOG §4 — all four
+mutations it named as surviving are now caught), the two STR language tables
+have a top-level key-parity guard (deleting an English key left the whole suite
+green, and the dialog then reads the literal key), and the whole-course delete
+confirm is driven by a test rather than only its endpoint.
+
+Forty-six mutations were applied to the new code — the filter deleted,
 the category match made exact, the period box pinned open and pinned shut, the
 cleared field left populated, the picker ignored, a blank date posted as-is, the
 picker tap left toggling, the confirm removed, Cancel ignored, the remembered

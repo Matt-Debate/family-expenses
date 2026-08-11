@@ -412,13 +412,43 @@ class AgentErgonomicsTests(unittest.TestCase):
 
     def test_a_pack_with_no_period_label_is_reachable_by_its_payment(self):
         """'8月' has nowhere else to match once the portal stops asking for a
-        period label — it lives in the payment, "足球课 8月"."""
+        period label — it lives in the payment, "足球课 8月". It surfaces as a
+        question rather than a write: see the wrong-course test below."""
         for month in ("8月", "9月"):
             self.call("expenses_add", amount="1000", description=f"足球课 {month}")
             self.call("classes_add", name="足球课", class_count=5, query=month)
 
         result = self.call("classes_log", kind="attended", query="9月")
-        self.assertEqual(result["expense"]["description"], "足球课 9月")
+        self.assertEqual(result["matched"], 1)
+        self.assertIn("9月", result["candidates"][0]["payment"])
+
+    def test_a_payment_match_never_logs_against_a_course_on_its_own(self):
+        """Matching the funding description is what makes '8月' resolvable at
+        all, but it is weak evidence: the payment for 游泳课 may well read
+        "足球课 8月 (转游泳)". Acting on it drew a class off swimming when the
+        owner said football — a wrong write with nothing to show for it.
+        """
+        self.call("expenses_add", amount="1000", description="足球课 8月 (转游泳)")
+        self.call("classes_add", name="游泳课", class_count=5, query="转游泳")
+
+        result = self.call("classes_log", kind="attended", query="足球课")
+        self.assertNotIn("id", result, "it logged against 游泳课 without asking")
+        self.assertEqual(result["matched"], 1)
+        self.assertEqual(result["candidates"][0]["name"], "游泳课")
+        self.assertIn("PAYMENT", result["hint"],
+                      "the agent is not told this match is the weaker kind")
+
+    def test_a_course_name_still_beats_a_payment_that_mentions_another(self):
+        """The tiering has to cut the right way: with a real 足球课 course in
+        the ledger, a swimming payment that happens to say 足球课 must not make
+        the football course ambiguous."""
+        self.call("expenses_add", amount="1000", description="足球课 8月 (转游泳)")
+        self.call("classes_add", name="游泳课", class_count=5, query="转游泳")
+        self.call("expenses_add", amount="2200", description="Football 9月")
+        self.call("classes_add", name="足球课", class_count=10, query="Football")
+
+        result = self.call("classes_log", kind="attended", query="足球课")
+        self.assertEqual(result["name"], "足球课")
 
     def test_two_packs_bought_in_one_sitting_are_still_distinguishable(self):
         """The normal MCP entry path: expenses_add defaults the date to today,
@@ -429,18 +459,28 @@ class AgentErgonomicsTests(unittest.TestCase):
         """
         paid = [self.call("expenses_add", amount="2200", description="足球课")["id"]
                 for _ in range(2)]
-        first = self.call("classes_add", name="足球课", class_count=10,
-                          expense_id=paid[0])["id"]
-        self.call("classes_log", kind="attended", package_id=first)
-        self.call("classes_add", name="足球课", class_count=10, expense_id=paid[1])
+        for expense_id in paid:
+            self.call("classes_add", name="足球课", class_count=10,
+                      expense_id=expense_id)
 
         result = self.call("classes_log", kind="attended", query="足球课")
         self.assertEqual(result["matched"], 2)
         rows = [
-            (c["payment"], c["classes_logged"], c["started"])
+            {k: v for k, v in c.items() if k != "package_id"}
             for c in result["candidates"]
         ]
-        self.assertEqual(len(set(rows)), 2, f"indistinguishable: {rows}")
+        # These two really are indistinguishable — same payment date, same
+        # description, same amount, no classes logged, created in the same
+        # second. What must hold is that the hint says so instead of telling
+        # the agent to ask the user to pick between two identical rows.
+        self.assertEqual(rows[0], rows[1], "fixture no longer reproduces the case")
+        # not a bare `assertIn("package_id", ...)` — the hint's generic tail
+        # already says "call again with that package_id", so that passes with
+        # the guidance for THIS case removed
+        self.assertIn("only `package_id` can separate", result["hint"],
+                      f"the hint still says to ask the user to pick: {result['hint']}")
+        self.assertNotEqual(result["candidates"][0]["package_id"],
+                            result["candidates"][1]["package_id"])
 
     def test_the_summary_note_names_a_pack_that_has_no_period_label(self):
         """P3: the note is the channel the agent reads back to the owner. Two
@@ -450,21 +490,13 @@ class AgentErgonomicsTests(unittest.TestCase):
             self.call("expenses_add", amount="1000", description=f"足球课 {month}")
             self.call("classes_add", name="足球课", class_count=5, query=month)
 
-        note = self.call("classes_list")["note"]
-        self.assertNotIn("—", note, f"the note still has no handle on a pack: {note}")
-
-    def test_the_matcher_asks_rather_than_guessing_when_a_payment_also_matches(self):
-        """Matching the funding description widens what resolves, so a course
-        can now be matched by another course's payment. That must surface as a
-        question, never as a write to the wrong package."""
-        self.call("expenses_add", amount="1000", description="游泳课 8月")
-        self.call("classes_add", name="游泳", class_count=5, query="游泳课")
-        self.call("expenses_add", amount="2000", description="8月课费（钢琴+游泳）")
-        self.call("classes_add", name="钢琴", class_count=8, query="钢琴")
-
-        result = self.call("classes_log", kind="attended", query="游泳")
-        self.assertEqual(result["matched"], 2)
-        self.assertNotIn("id", result, "it acted instead of asking")
+        # asserting the placeholder is gone would pass for any filler, including
+        # one that reads the same for both packs — what matters is that the two
+        # lines differ, since the note is how the agent names them back
+        lines = sorted(self.call("classes_list")["note"].split("; "))
+        self.assertEqual(len(lines), 2, lines)
+        self.assertNotEqual(lines[0], lines[1], f"both packs read alike: {lines}")
+        self.assertNotIn("—", lines[0])
 
     def test_an_archived_course_is_still_reachable_by_the_agent(self):
         """classes_list hides it by default; that must not make it impossible

@@ -996,12 +996,17 @@
       esc(packages.length + " " + t("cls_cls")) + "</span></div><div class='list'>" +
       packages.map(function (p) {
         var L = clsLine(p);
-        // a per_class pack carries no period label (the form stopped asking),
+        // A per_class pack carries no period label (the form stopped asking),
         // so without the payment behind it two terms of 足球课 render byte for
         // byte the same — and a class logged against the wrong one moves both
-        // rows' figures while both still look right
-        var title = esc(p.name) + " · " +
-          esc(p.period_label || p.expense.date);
+        // rows' figures while both still look right. The payment DESCRIPTION,
+        // not its date: two terms bought in one sitting share a date, and the
+        // description is where she already writes the month ("Football (8月)").
+        // escaped per value rather than around the ||-chain: `esc()` maps a
+        // null to "", so the fallbacks still work, and the P6 guard can see
+        // every field is wrapped without having to parse the expression
+        var title = esc(p.name) + " · " + (esc(p.period_label) ||
+          esc(p.expense.description) || esc(p.expense.date));
         var isOpen = !!openPkgs[p.id];
         return '<div class="item' + (isOpen ? " open" : "") + '" data-pkg="' +
           esc(p.id) + '">' +
@@ -1022,7 +1027,7 @@
           '<div class="clsdate"' + (isOpen ? "" : ' hidden=""') + ">" +
             '<label for="c-date-' + esc(p.id) + '">' + esc(t("cls_date")) +
               '</label><input type="date" class="c-date" id="c-date-' +
-                esc(p.id) + '" data-seeded="' + esc(todayStr()) + '" value="' +
+                esc(p.id) + '" value="' +
                 esc(clsDates[p.id] || todayStr()) + '"></div>' +
           '<div class="btns"' + (isOpen ? "" : ' hidden=""') + ">" +
             (p.kind === "per_class"
@@ -1272,14 +1277,13 @@
         .catch(function (e) { toast(e.message); });
       return;
     }
-    // The picker's value is only a CHOICE if it differs from what the row was
-    // seeded with. Trusting the value itself is wrong twice: a row left open
-    // across midnight still holds yesterday's seed, and a date used to backfill
-    // one class would silently date every later class in this session too.
-    var dateEl = itemEl.querySelector(".c-date");
-    var chosen = dateEl ? dateEl.value : "";
-    var d = (chosen && chosen !== dateEl.getAttribute("data-seeded"))
-      ? chosen : todayStr();
+    // clsDates is the ONE record of "she committed a date" — the change
+    // listener writes it and nothing else does. Reading the input instead
+    // cannot tell an untouched picker from a deliberate pick of the date the
+    // row happens to be showing, and it survives the delete below, so a second
+    // tap before the refresh lands would reuse it. Unset ⇒ recompute today,
+    // which is also what makes a row left open across midnight log today.
+    var d = clsDates[id] || todayStr();
     // a double tap would log the class twice, and on a period package each
     // extra one claims another class back from the school
     if (b.disabled) return;

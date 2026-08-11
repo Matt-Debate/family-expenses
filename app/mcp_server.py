@@ -343,17 +343,25 @@ def build_mcp(store: Store) -> FastMCP:
                 "target missing: pass package_id, or query with a word from the "
                 "course name (e.g. query='足球')"
             )
-        matches = [
+        named = [
             p for p in packages
             if text in (p["name"] or "").lower()
             or text in (p["period_label"] or "").lower()
-            # the funding payment too: a per_class pack carries no period label
-            # since v0.10.1 (the portal stopped asking for one), so '8月' has
-            # nowhere else to match — it lives in "Football (8月, 10课)"
-            or text in (p["expense"]["description"] or "").lower()
         ]
-        if len(matches) == 1:
-            return matches[0]["id"], None
+        if len(named) == 1:
+            return named[0]["id"], None
+        # The funding payment is the weaker signal, and only consulted when the
+        # course names miss: a per_class pack carries no period label since
+        # v0.10.1, so '8月' has nowhere else to match — it lives in
+        # "Football (8月, 10课)". It never resolves on its own, because the
+        # payment for 游泳课 may well say "足球课 8月 (转游泳)", and drawing a
+        # class off swimming when the owner said football is a wrong write with
+        # nothing to show for it.
+        by_payment = not named
+        matches = named or [
+            p for p in packages
+            if text in (p["expense"]["description"] or "").lower()
+        ]
         if not matches:
             return None, {
                 "matched": 0, "candidates": [],
@@ -371,17 +379,25 @@ def build_mcp(store: Store) -> FastMCP:
                  "payment": f"{p['expense']['date']} · "
                             f"{p['expense']['description'] or '–'} · "
                             f"¥{p['expense']['amount']:.2f}",
-                 # two terms bought in one sitting share a date, a description
-                 # and an amount, so `payment` alone can still print twice.
-                 # These cannot: one is the log, the other is app-stamped.
+                 # two terms bought in one sitting can share a date, a
+                 # description AND an amount, so `payment` alone can print
+                 # twice; `created_at` is second-granular, so `started` can too.
+                 # `package_id` is the only handle unique by construction.
                  "classes_logged": len(p["events"]),
                  "started": p["created_at"]}
                 for p in matches[:8]
             ],
-            "hint": ("several courses match — show these to the user, ask which, "
-                     "then call again with that package_id. `payment` is what "
-                     "usually tells two same-named courses apart; if those read "
-                     "alike too, `classes_logged` and `started` differ"),
+            "hint": (
+                (f"nothing is CALLED {query!r} — these are courses whose "
+                 "PAYMENT says so, which is a weaker match. Confirm with the "
+                 "user before logging against one, then call again with its "
+                 "package_id. "
+                 if by_payment else
+                 "several courses match — show these to the user, ask which, "
+                 "then call again with that package_id. ")
+                + "`payment` is usually what tells two same-named courses "
+                  "apart; if these rows read alike, they are courses only "
+                  "`package_id` can separate — say so rather than guessing"),
         }
 
     @mcp.tool(annotations=_READ)
@@ -398,8 +414,11 @@ def build_mcp(store: Store) -> FastMCP:
             s = p["summary"]
             # the period label, or the payment behind it: a per_class package
             # created from the portal has no label since v0.10.1, and two terms
-            # of one course would otherwise both read "足球课 (—)" here
-            tag = p["period_label"] or p["expense"]["date"]
+            # of one course would otherwise both read "足球课 (—)" here. The
+            # payment's DESCRIPTION, not its date — two terms bought in one
+            # sitting share a date, and she writes the month in the description.
+            tag = (p["period_label"] or p["expense"]["description"]
+                   or p["expense"]["date"])
             if p["kind"] == "per_class":
                 lines.append(
                     f"{p['name']} ({tag}): "
