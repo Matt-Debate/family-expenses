@@ -370,12 +370,18 @@ def build_mcp(store: Store) -> FastMCP:
                  "period_label": p["period_label"], "kind": p["kind"],
                  "payment": f"{p['expense']['date']} · "
                             f"{p['expense']['description'] or '–'} · "
-                            f"¥{p['expense']['amount']:.2f}"}
+                            f"¥{p['expense']['amount']:.2f}",
+                 # two terms bought in one sitting share a date, a description
+                 # and an amount, so `payment` alone can still print twice.
+                 # These cannot: one is the log, the other is app-stamped.
+                 "classes_logged": len(p["events"]),
+                 "started": p["created_at"]}
                 for p in matches[:8]
             ],
-            "hint": ("several courses match — show these to the user, ask which "
-                     "(the `payment` field is what tells two same-named courses "
-                     "apart), then call again with that package_id"),
+            "hint": ("several courses match — show these to the user, ask which, "
+                     "then call again with that package_id. `payment` is what "
+                     "usually tells two same-named courses apart; if those read "
+                     "alike too, `classes_logged` and `started` differ"),
         }
 
     @mcp.tool(annotations=_READ)
@@ -390,15 +396,19 @@ def build_mcp(store: Store) -> FastMCP:
         lines = []
         for p in packages:
             s = p["summary"]
+            # the period label, or the payment behind it: a per_class package
+            # created from the portal has no label since v0.10.1, and two terms
+            # of one course would otherwise both read "足球课 (—)" here
+            tag = p["period_label"] or p["expense"]["date"]
             if p["kind"] == "per_class":
                 lines.append(
-                    f"{p['name']} ({p['period_label'] or '—'}): "
+                    f"{p['name']} ({tag}): "
                     f"{s['remaining']}/{s['class_count']} classes left, "
                     f"¥{s['remaining_amount']:.2f}"
                 )
             else:
                 lines.append(
-                    f"{p['name']} ({p['period_label'] or '—'}): "
+                    f"{p['name']} ({tag}): "
                     f"{s['owed']} owed back = ¥{s['owed_amount']:.2f} "
                     f"({s['reclaimable']} theirs / {s['forfeited']} ours)"
                 )
@@ -426,7 +436,10 @@ def build_mcp(store: Store) -> FastMCP:
         down one at a time; kind='period' for a flat month/semester fee where
         MISSED classes are owed back. The per-class rate is derived from the
         payment (amount ÷ class_count) — do not pass a rate. period_label is
-        free text like '8月' or '秋季学期'."""
+        free text like '8月' or '秋季学期'. NOTE: the portal's Classes tab only
+        offers payments categorised 'aden-edu' or 'aden-sports', so a course
+        funded by any other category is trackable here but invisible there —
+        expenses_update the category if she should be able to see it."""
         eid, ambiguous = _resolve(expense_id, query, prefer_unpaid=False)
         if ambiguous:
             return ambiguous

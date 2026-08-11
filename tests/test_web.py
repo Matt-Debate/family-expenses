@@ -851,6 +851,12 @@ class ClassRowRenderingTests(unittest.TestCase):
                 {"id": "e1", "date": "2026-08-05", "kind": "attended",
                  "logged_by": "wife", "note": None},
             ],
+            # every real payload carries this (INNER JOIN in _PACKAGE_SELECT);
+            # without it a fixture passes only because `period_label ||` never
+            # evaluates the right-hand side
+            "expense": {"id": "x1", "date": "2026-08-20", "amount": 2200.0,
+                        "description": "足球课", "category": "aden-sports",
+                        "paid": False},
             "summary": {"remaining": 9, "class_count": 10, "rate": 220.0,
                         "used": 1, "overrun": 0, "remaining_amount": 1980.0},
         }
@@ -904,8 +910,30 @@ function categoryLabel(e) {{ return e.category || ""; }}
         """Logging a class used to open prompt() and ask a phone user to type
         "2026-08-05" by hand — under a label that said 到期日 (due date)."""
         html = self.render(open_ids=["p1"])
-        self.assertIn('<input type="date" class="c-date" value="2026-08-11">', html)
+        self.assertIn('class="c-date" id="c-date-p1" data-seeded="2026-08-11" '
+                      'value="2026-08-11"', html)
+        self.assertIn('<label for="c-date-p1">', html)   # tappable label
         self.assertIn("cls_date", html)   # its own label, not t("due")
+
+    def test_the_picker_records_what_today_was_when_the_row_was_drawn(self):
+        """Without it, a tap cannot tell "she chose this date" from "nobody has
+        touched it" — and the row may have been drawn yesterday."""
+        html = self.render(open_ids=["p1"], seed='clsDates = {p1: "2026-07-02"};')
+        self.assertIn('data-seeded="2026-08-11" value="2026-07-02"', html)
+
+    def test_a_course_with_no_period_label_still_names_its_payment(self):
+        """The shape this now produces exclusively: the portal stopped asking a
+        per-class pack for a period label, and that label was the row's only
+        disambiguator. Two terms of 足球课 would render byte for byte the same,
+        so a class logged against the wrong one moves both rows' figures while
+        both still look right.
+        """
+        html = self.render(open_ids=[], seed="""
+packages[0].period_label = null;
+packages[0].expense = {date: "2026-08-20", amount: 2200, description: "足球课"};
+""")
+        self.assertIn("2026-08-20", html,
+                      "nothing in the row tells two same-named courses apart")
 
     def test_a_closed_row_hides_the_date_picker_with_its_buttons(self):
         html = self.render(open_ids=[])
@@ -916,7 +944,7 @@ function categoryLabel(e) {{ return e.category || ""; }}
         backfilling three missed classes from last month is three date picks,
         and the third one silently lands on today if she forgets."""
         html = self.render(open_ids=["p1"], seed='clsDates = {p1: "2026-07-02"};')
-        self.assertIn('class="c-date" value="2026-07-02"', html)
+        self.assertIn('value="2026-07-02"', html)
 
     def test_removing_a_class_record_carries_what_it_would_remove(self):
         """The confirm names the row; without this attribute it would ask about
@@ -1083,10 +1111,12 @@ class ClassTabInteractionTests(unittest.TestCase):
         self.assertIn("openPkgs[id]", handler, "handler markers moved")
         harness = """
 var openPkgs = {}, logged = [], rendered = 0, apiCalls = [];
+var clsDates = {"p1": "2026-07-02"};   // as a backfill would have left it
 var PKG = "p1";
 function renderClasses() { rendered++; }
 function refreshClasses() { rendered++; }
-function toast() {}
+var toasts = [];
+function toast(m) { toasts.push(String(m)); }
 function t(k) { return k; }
 function todayStr() { return "2026-08-11"; }
 function confirm(msg) { confirms.push(msg); return confirmed; }
@@ -1097,8 +1127,12 @@ function api(name, body) {
 }
 var button = {disabled: false, getAttribute: function (a) {
   return a === "data-c" ? this._c : null; }, _c: null};
-// the row's date picker — what the log buttons read instead of prompt()
-var dateEl = {value: "2026-08-05"};
+// The row's date picker — what the log buttons read instead of prompt().
+// data-seeded is what today WAS when the row was drawn; a value still equal to
+// it is nobody's choice, so the default here differs from todayStr() only
+// because a test set it.
+var dateEl = {value: "2026-08-05", _seeded: "2026-08-11",
+  getAttribute: function (a) { return a === "data-seeded" ? this._seeded : null; }};
 var itemEl = {getAttribute: function (a) { return a === "data-pkg" ? PKG : null; },
   querySelector: function (sel) { return sel === ".c-date" ? dateEl : null; }};
 var confirmed = true, confirms = [];
@@ -1114,7 +1148,8 @@ $ = function () { return {addEventListener: function (_e, fn) { handlerFn = fn; 
                   + "\n" + driver
                   + "\nconsole.log(JSON.stringify({openPkgs: openPkgs, "
                     "rendered: rendered, apiCalls: apiCalls, "
-                    "confirms: confirms, disabled: button.disabled}));\n")
+                    "confirms: confirms, clsDates: clsDates, toasts: toasts, "
+                    "disabled: button.disabled}));\n")
         out = subprocess.run(["node", "-e", script], capture_output=True,
                              text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
@@ -1168,7 +1203,7 @@ var ev = {target: {closest: function (sel) {
 handlerFn(ev);
 """
 
-    def test_the_logged_date_is_the_one_in_the_row_picker(self):
+    def test_the_logged_date_is_the_one_she_picked(self):
         """Reading todayStr() instead of the picker ignores what she chose and
         dates every backfilled class today — a silently wrong class log."""
         state = self.run_handler('dateEl.value = "2026-07-02";\n' + self.LOG_TAP)
@@ -1179,6 +1214,36 @@ handlerFn(ev);
         on a phone an empty box is easy to leave behind."""
         state = self.run_handler('dateEl.value = "";\n' + self.LOG_TAP)
         self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-11")
+
+    def test_a_row_left_open_across_midnight_still_logs_today(self):
+        """A row stays open across re-renders, and the picker's value was baked
+        in by the LAST render. Trusting it posts yesterday for a class that
+        happened today — the same stale-date bug v0.9.0 already had to fix once,
+        moved from the add form into the class log.
+        """
+        state = self.run_handler("""
+dateEl._seeded = "2026-08-10";   // this row was drawn yesterday…
+dateEl.value = "2026-08-10";     // …and nobody has touched the picker since
+""" + self.LOG_TAP)               # todayStr() in the harness is 2026-08-11
+        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-11")
+
+    def test_the_remembered_date_does_not_outlive_the_log_it_was_for(self):
+        """Nothing cleared clsDates, so one backfill dated every later class in
+        the session: log a missed class on July 2, tap ✓上了 that evening for a
+        class that happened today, and it is filed under July 2 as well. Silent
+        — the log sorts date-DESC, so the wrong row sinks below what she just
+        looked at.
+        """
+        state = self.run_handler('dateEl.value = "2026-07-02";\n' + self.LOG_TAP)
+        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-07-02")
+        self.assertEqual(state["clsDates"], {},
+                         "the backfill date survived its own log")
+
+    def test_the_toast_says_which_date_was_logged(self):
+        """The one action here with no confirmation step. Naming the date is
+        what makes a wrong one visible at the moment it happens."""
+        state = self.run_handler('dateEl.value = "2026-07-02";\n' + self.LOG_TAP)
+        self.assertIn("2026-07-02", state["toasts"][-1])
 
     def test_opening_the_date_picker_does_not_close_the_row(self):
         """The picker lives inside the row, and the row's own tap handler
@@ -1205,6 +1270,49 @@ var ev = {target: {closest: function (sel) {
   return null; }}, stopPropagation: function () {}};
 handlerFn(ev);
 """
+
+    def remember_date(self, driver: str) -> dict:
+        """Run the real classesBody `change` listener — the half of the date
+        memory that no test executed. A key/value swap there keeps every token
+        the wiring guard greps for and silently makes the memory never work.
+        """
+        import json
+
+        src = self.PORTAL.read_text(encoding="utf-8")
+        start = src.index("  // the picker's date outlives the re-render")
+        block = src[start:src.index('  $("addClsForm")')]
+        self.assertIn("clsDates[", block, "block markers moved")
+        script = ("var clsDates = {}, handlerFn = null;\n"
+                  'var $ = function () { return {addEventListener:'
+                  " function (_e, fn) { handlerFn = fn; }}; };\n"
+                  + block + "\n" + driver
+                  + "\nconsole.log(JSON.stringify(clsDates));\n")
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_picking_a_date_records_it_against_that_package(self):
+        state = self.remember_date("""
+var dateEl = {value: "2026-07-02"};
+var itemEl = {getAttribute: function (a) { return a === "data-pkg" ? "p1" : null; }};
+handlerFn({target: {closest: function (sel) {
+  if (sel === ".c-date") return dateEl;
+  if (sel === "[data-pkg]") return itemEl;
+  return null; }}});
+""")
+        self.assertEqual(state, {"p1": "2026-07-02"})
+
+    def test_a_change_somewhere_else_in_the_row_is_ignored(self):
+        """The listener is on the whole tab body, so every input in every course
+        row reaches it — only the date picker may write here."""
+        state = self.remember_date("""
+var itemEl = {getAttribute: function (a) { return a === "data-pkg" ? "p1" : null; }};
+handlerFn({target: {closest: function (sel) {
+  if (sel === "[data-pkg]") return itemEl;
+  return null; }}});
+""")
+        self.assertEqual(state, {})
 
     def test_removing_a_class_record_asks_first(self):
         """A 12px × beside the class log, one mis-tap from erasing attendance —
@@ -1305,6 +1413,10 @@ class ClassKindParityTests(unittest.TestCase):
         Delete button while marked hidden. The Period box sits in a .row."""
         self.assertIn(".row > [hidden]", self.portal)
         self.assertRegex(self.portal, r"\.row > \[hidden\][^{]*\{[^}]*display:none")
+        # the rule is keyed on that parent, so the box has to still be in one
+        self.assertRegex(
+            self.portal,
+            r'(?s)<div class="row">.*?<div id="clsPeriodWrap">.*?</div>\s*</div>')
 
     def test_event_kinds_match_the_store(self):
         from app.store import CLASS_EVENT_KINDS

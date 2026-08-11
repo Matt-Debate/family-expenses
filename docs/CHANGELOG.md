@@ -12,8 +12,10 @@ carry them.)
 
 ## [0.10.1] — 2026-08-11
 
-Five things the owner hit within a day of the class tracker going live. All of
-them are the Classes tab; none touches money, the MCP surface, or §5.1.
+Six things the owner hit within a day of the class tracker going live, plus
+what two review rounds found in the fixes for them. All of it is the Classes
+tab; none of it moves a total or changes the MCP tool set, and §5.1 is not
+engaged.
 
 ### Changed
 - **The payment dropdown offers course payments only** — `aden-edu` and
@@ -37,20 +39,59 @@ them are the Classes tab; none touches money, the MCP surface, or §5.1.
 - **A per-class pack is no longer asked for a 周期.** A pack of N classes is
   counted in classes, not in months. The box is hidden **and cleared** for that
   kind: a hidden field that still submits what she typed is the exact shape of
-  bug this file keeps finding. Consequence worth knowing: two per-class packs
-  bought for the same course now render under the same title, so the month
-  belongs in the course name (「足球课 8月」).
+  bug this file keeps finding. It costs the row its only disambiguator, which
+  is why the title now falls back to the funding payment's date — see below.
 - **Logging a class uses a date picker.** It opened `prompt()` and asked a phone
   user to type `2026-08-05` by hand — under a label that said 到期日, the
   *expense* due date, which is not what a class date is. Now an
   `<input type="date">` in the row, labelled 上课日期 / Class date, starting at
-  the household's today, for all three buttons (上了 · 停课 · 没去). The date she
-  picks survives the re-render that each log triggers, so backfilling three
-  missed classes from last month is one date pick rather than three.
+  the household's today, for all three buttons (上了 · 停课 · 没去). A date she
+  picks survives a re-render (tapping another row causes one) but not the log it
+  was for — see the review fixes below for why that distinction is the whole
+  safety property.
 
-### Fixed
-- **A consequence of the above, on the MCP side: two same-named packs became
-  unresolvable.** `classes_log(query=…)` disambiguates on `name` +
+### Fixed after review
+Two independent reviewers went over the first cut of this release. They found
+the same defect first, and both reproduced it by executing the portal's own
+JavaScript rather than reading it.
+
+- **The remembered date never expired.** `clsDates` was written on every pick
+  and cleared by nothing — so one backfill dated every later class in that
+  session. Log a missed class on July 2, tap ✓上了 that evening for a class that
+  happened today, and it filed under July 2 as well. Silent: the toast named no
+  date, logging has no confirm step, `class_events` has no unique index on
+  `(package_id, date, kind)`, and the log sorts date-DESC so the wrong row sinks
+  *below* what she just looked at. **No total moved** —`summarize_package`
+  tallies by `kind` and never reads a date — but the class log is the thing the
+  owner argues with the school about. The memory now dies with the log it was
+  for, and the success toast names the date.
+- **The picker's value was decided at render time, not at tap time.** A row
+  stays open across re-renders, so one left open across midnight posted
+  *yesterday* — the same stale-date bug v0.9.0 had to fix once already, moved
+  from the add form into the class log. The input now carries `data-seeded`
+  (what today was when the row was drawn), and a tap treats the value as a
+  choice only when it differs from that seed; otherwise it recomputes today.
+- **Two per-class packs rendered byte for byte identical.** `period_label` was
+  the row title's only disambiguator, and this release guarantees it is NULL for
+  everything the portal creates. A class logged against the wrong 足球课 moves
+  both rows' figures while both still look right. The title now falls back to
+  the funding payment's date, and the changelog's "put the month in the name"
+  advice is no longer load-bearing.
+- The `classes_list` note printed `足球课 (—)` for every label-less pack, and
+  the MCP disambiguation `payment` string collapsed to identical text when two
+  terms were bought in one sitting (same date, description and amount — the
+  normal MCP entry path, since `expenses_add` defaults the date to today). The
+  note falls back to the payment date; candidates carry `classes_logged` and
+  `started`, which cannot both match.
+- The category filter only explained itself when it hid *everything*. The form
+  label names it always (「哪一笔付款（只显示 Aden 教育 / Aden 运动）」), and
+  `classes_add`'s tool description tells the agent that a course funded by any
+  other category is trackable over MCP but invisible in the portal.
+- Caught while fixing the above, not by a reviewer: wrapping the date input in
+  its `<label>` would have rendered it at `.75rem` bold and letter-spaced, since
+  `input { font:inherit }`. Paired by `for`/`id` instead.
+- **A consequence of the period-label change, on the MCP side: two same-named
+  packs became unresolvable.** `classes_log(query=…)` disambiguates on `name` +
   `period_label`, and a per-class pack created from the portal now has no period
   label — so two terms of 足球课 returned two candidates that were identical in
   every field shown, and the disambiguation question the agent is instructed to
@@ -69,13 +110,16 @@ them are the Classes tab; none touches money, the MCP surface, or §5.1.
   under her thumb before the picker could open.
 
 ### Tests
-250 → 270. Fifteen mutations were applied to the new code — the filter deleted,
+250 → 280. Twenty-six mutations were applied to the new code — the filter deleted,
 the category match made exact, the period box pinned open and pinned shut, the
 cleared field left populated, the picker ignored, a blank date posted as-is, the
 picker tap left toggling, the confirm removed, Cancel ignored, the remembered
 date forgotten, the confirm's subject dropped, a typo in `CLASS_CATEGORIES`, the
 payment stripped from the MCP candidates and the payment description dropped
-from the matcher — and every one is caught. `ClassPeriodFieldTests` and the extended
+from the matcher, plus the eleven covering the review fixes above — and every
+one is caught. The `change` listener that records a picked date had no executing
+test at all in the first cut; a key/value swap in it kept every token the wiring
+guard greps for while making the memory silently never work. `ClassPeriodFieldTests` and the extended
 `ClassTabInteractionTests` execute the portal's own JS under node rather than
 grepping its source; the two grep-shaped guards that remain are there because a
 function nothing calls is a no-op the node harness cannot see.

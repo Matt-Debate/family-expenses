@@ -305,7 +305,8 @@
       paid_month:"本月已付", add:"添加一笔", amount:"金额 (¥)", due:"到期日",
       desc:"内容", desc_ph:"买了什么 / 给谁付", category:"分类", save_new:"添加",
       tab_now:"待付", tab_classes:"课程", tab_history:"记录", tab_stats:"分析",
-      cls_add:"添加课程", cls_payment:"哪一笔付款", cls_name:"课程名称",
+      cls_add:"添加课程", cls_payment:"哪一笔付款（只显示 Aden 教育 / Aden 运动）",
+      cls_name:"课程名称",
       cls_count:"课时数", cls_kind:"类型", cls_period:"周期", cls_period_ph:"如 8月",
       cls_date:"上课日期",  // NOT t("due") — that reads 到期日, which this is not
       cls_save:"添加", cls_kind_per:"按次（一共几节）", cls_kind_period:"按月／学期",
@@ -348,7 +349,9 @@
       paid_month:"Paid this month", add:"Add an expense", amount:"Amount (¥)", due:"Due date",
       desc:"Description", desc_ph:"what / who to pay", category:"Category", save_new:"Add",
       tab_now:"Due", tab_classes:"Classes", tab_history:"History", tab_stats:"Stats",
-      cls_add:"Add a course", cls_payment:"Which payment", cls_name:"Course",
+      cls_add:"Add a course",
+      cls_payment:"Which payment (Aden · education / Aden · sports only)",
+      cls_name:"Course",
       cls_count:"Classes", cls_kind:"Type", cls_period:"Period", cls_period_ph:"e.g. 8月",
       cls_date:"Class date",
       cls_save:"Add", cls_kind_per:"Per class (a pack)", cls_kind_period:"Monthly · semester",
@@ -993,7 +996,12 @@
       esc(packages.length + " " + t("cls_cls")) + "</span></div><div class='list'>" +
       packages.map(function (p) {
         var L = clsLine(p);
-        var title = esc(p.name) + (p.period_label ? " · " + esc(p.period_label) : "");
+        // a per_class pack carries no period label (the form stopped asking),
+        // so without the payment behind it two terms of 足球课 render byte for
+        // byte the same — and a class logged against the wrong one moves both
+        // rows' figures while both still look right
+        var title = esc(p.name) + " · " +
+          esc(p.period_label || p.expense.date);
         var isOpen = !!openPkgs[p.id];
         return '<div class="item' + (isOpen ? " open" : "") + '" data-pkg="' +
           esc(p.id) + '">' +
@@ -1005,10 +1013,17 @@
           // the date the buttons below will log against. A phone user was
           // being asked to type "2026-08-05" into a prompt(); the picker also
           // gets to say 上课日期 rather than the 到期日 the prompt borrowed.
+          // data-seeded records what today WAS when this row was drawn, so a
+          // tap can tell "she chose this date" from "nobody has touched it" —
+          // a row stays open across re-renders, and across midnight.
+          // `for`/`id` rather than wrapping the input: `input { font:inherit }`
+          // inside a `label { font-size:.75rem; font-weight:600 }` renders the
+          // date tiny, bold and letter-spaced.
           '<div class="clsdate"' + (isOpen ? "" : ' hidden=""') + ">" +
-            "<label>" + esc(t("cls_date")) + "</label>" +
-            '<input type="date" class="c-date" value="' +
-              esc(clsDates[p.id] || todayStr()) + '"></div>' +
+            '<label for="c-date-' + esc(p.id) + '">' + esc(t("cls_date")) +
+              '</label><input type="date" class="c-date" id="c-date-' +
+                esc(p.id) + '" data-seeded="' + esc(todayStr()) + '" value="' +
+                esc(clsDates[p.id] || todayStr()) + '"></div>' +
           '<div class="btns"' + (isOpen ? "" : ' hidden=""') + ">" +
             (p.kind === "per_class"
               ? '<button class="pay" data-c="attended">' + esc(t("cls_attend")) + "</button>"
@@ -1257,16 +1272,25 @@
         .catch(function (e) { toast(e.message); });
       return;
     }
-    // the date comes from the row's picker, which starts at the household's
-    // today. Cleared by hand it reads "" — fall back rather than post a blank.
+    // The picker's value is only a CHOICE if it differs from what the row was
+    // seeded with. Trusting the value itself is wrong twice: a row left open
+    // across midnight still holds yesterday's seed, and a date used to backfill
+    // one class would silently date every later class in this session too.
     var dateEl = itemEl.querySelector(".c-date");
-    var d = (dateEl && dateEl.value) || todayStr();
+    var chosen = dateEl ? dateEl.value : "";
+    var d = (chosen && chosen !== dateEl.getAttribute("data-seeded"))
+      ? chosen : todayStr();
     // a double tap would log the class twice, and on a period package each
     // extra one claims another class back from the school
     if (b.disabled) return;
     b.disabled = true;
     api("classes-log", {package_id:id, kind:act, date:d})
-      .then(function () { toast(t("cls_logged")); refreshClasses(); })
+      .then(function () {
+        // the memory covers picking a date and then re-rendering (a tap on
+        // another row does that). It must NOT outlive the log it was for.
+        delete clsDates[id];
+        toast(t("cls_logged") + " · " + d); refreshClasses();
+      })
       .catch(function (e) { toast(e.message); })
       .then(function () { b.disabled = false; });
   });

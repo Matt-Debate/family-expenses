@@ -420,6 +420,52 @@ class AgentErgonomicsTests(unittest.TestCase):
         result = self.call("classes_log", kind="attended", query="9月")
         self.assertEqual(result["expense"]["description"], "足球课 9月")
 
+    def test_two_packs_bought_in_one_sitting_are_still_distinguishable(self):
+        """The normal MCP entry path: expenses_add defaults the date to today,
+        so two terms bought in one sitting share a date, a description AND an
+        amount. `payment` then prints identically for both, and the hint still
+        tells the agent to ask the user to choose between two identical rows —
+        which is the exact failure the payment field was added to fix.
+        """
+        paid = [self.call("expenses_add", amount="2200", description="足球课")["id"]
+                for _ in range(2)]
+        first = self.call("classes_add", name="足球课", class_count=10,
+                          expense_id=paid[0])["id"]
+        self.call("classes_log", kind="attended", package_id=first)
+        self.call("classes_add", name="足球课", class_count=10, expense_id=paid[1])
+
+        result = self.call("classes_log", kind="attended", query="足球课")
+        self.assertEqual(result["matched"], 2)
+        rows = [
+            (c["payment"], c["classes_logged"], c["started"])
+            for c in result["candidates"]
+        ]
+        self.assertEqual(len(set(rows)), 2, f"indistinguishable: {rows}")
+
+    def test_the_summary_note_names_a_pack_that_has_no_period_label(self):
+        """P3: the note is the channel the agent reads back to the owner. Two
+        label-less packs both reading "足球课 (—)" answers 还剩几节课 with a
+        figure the owner cannot attach to a course."""
+        for month in ("8月", "9月"):
+            self.call("expenses_add", amount="1000", description=f"足球课 {month}")
+            self.call("classes_add", name="足球课", class_count=5, query=month)
+
+        note = self.call("classes_list")["note"]
+        self.assertNotIn("—", note, f"the note still has no handle on a pack: {note}")
+
+    def test_the_matcher_asks_rather_than_guessing_when_a_payment_also_matches(self):
+        """Matching the funding description widens what resolves, so a course
+        can now be matched by another course's payment. That must surface as a
+        question, never as a write to the wrong package."""
+        self.call("expenses_add", amount="1000", description="游泳课 8月")
+        self.call("classes_add", name="游泳", class_count=5, query="游泳课")
+        self.call("expenses_add", amount="2000", description="8月课费（钢琴+游泳）")
+        self.call("classes_add", name="钢琴", class_count=8, query="钢琴")
+
+        result = self.call("classes_log", kind="attended", query="游泳")
+        self.assertEqual(result["matched"], 2)
+        self.assertNotIn("id", result, "it acted instead of asking")
+
     def test_an_archived_course_is_still_reachable_by_the_agent(self):
         """classes_list hides it by default; that must not make it impossible
         to correct a class logged against it."""
