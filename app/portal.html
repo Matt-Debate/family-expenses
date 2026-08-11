@@ -951,6 +951,10 @@
 
   function renderClasses() {
     var sel = $("clsExpense");
+    // a row tap re-renders the whole tab, and rebuilding the options resets
+    // the selection to the first payment — she would then link the course to
+    // whichever expense happens to be at the top
+    var keepPayment = sel.value;
     // only payments not already tracked: one payment, one package, or the same
     // money would be counted twice
     sel.innerHTML = candidates.length
@@ -962,6 +966,7 @@
             esc(money0(e.amount)) + " · " + esc(e.date) + "</option>";
         }).join("")
       : '<option value="">' + esc(t("cls_no_payment")) + "</option>";
+    if (keepPayment) sel.value = keepPayment;
     clsRateHint();
 
     var body = $("classesBody");

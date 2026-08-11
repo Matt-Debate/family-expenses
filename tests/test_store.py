@@ -563,6 +563,11 @@ class ClassMoneyInvariantTests(unittest.TestCase):
     AMOUNTS = (
         0.01, 0.07, 1.0, 9.99, 99.95, 100.0, 333.33, 999.99, 1000.0, 1000.01,
         1234.57, 2000.0, 2200.01, 2727.46, 4238.31, 5000.05, 12345.67, 99999.99,
+        # third decimals — the shape that breaks the cap, and which the first
+        # version of this sweep called "half-cent boundaries" while containing
+        # none. `_validate_amount` accepts them and never rounds, so the MCP
+        # and a direct /api/* call can both produce one.
+        100.035, 0.005, 1000.999, 33.333, 2.225, 987.6545,
     )
     COUNTS = (1, 2, 3, 4, 5, 7, 8, 10, 12)
 
@@ -629,19 +634,27 @@ class ClassMoneyInvariantTests(unittest.TestCase):
 
     def test_the_owed_total_is_the_exact_ratio_while_it_fits(self):
         """Reconciling must not cost accuracy: below the cap the total is still
-        amount x n / count, not a sum of rounded pieces."""
+        amount x n / count, not a sum of rounded pieces.
+
+        At n == count it is the PAYMENT, not the ratio. Those differ for an
+        amount on a half-cent — `round(amount*count/count, 2)` can land a cent
+        above `round(amount, 2)` — and that gap is exactly how a package came
+        to report owing back more than was handed over.
+        """
         for amount in self.AMOUNTS:
             for count in self.COUNTS:
                 for school in range(0, count + 1):
                     for ours in range(0, count + 1 - school):
                         s = self.summarize("period", amount, count,
                                            school=school, ours=ours)
+                        missed = school + ours
+                        expected = (
+                            round(amount, 2) if missed >= count
+                            else round(amount * missed / count, 2)
+                        )
                         with self.subTest(amount=amount, count=count,
                                           school=school, ours=ours):
-                            self.assertEqual(
-                                s["owed_amount"],
-                                round(amount * (school + ours) / count, 2),
-                            )
+                            self.assertEqual(s["owed_amount"], expected)
 
     def test_no_figure_is_ever_negative_or_a_negative_zero(self):
         """An amount carrying a third decimal made `remaining_amount` -0.0,
@@ -1124,19 +1137,56 @@ class ClassTrackerTests(unittest.TestCase):
 
     def test_a_non_integrity_failure_is_not_laundered_into_a_reason(self):
         """Rewriting every insert failure as 'already tracked' turns a dropped
-        connection into a confident false statement, and the write is lost."""
+        connection into a confident false statement, and the write is lost.
+
+        The failure is injected at the DB call so the REAL `_insert_package`
+        and the REAL `if not _is_integrity_error(exc): raise` both run —
+        stubbing `_insert_package` wholesale proved only that the outer
+        `except` was narrow, and left the guard itself unpinned.
+        """
+        import contextlib
+
         expense = self.store.create(date="2026-08-03", amount=100)
         boom = RuntimeError("connection reset by peer")
+        real_tx = self.store.db.tx
 
-        def explode(*_a, **_k):
-            raise boom
+        @contextlib.contextmanager
+        def failing_tx():
+            with real_tx() as tx:
+                class Proxy:
+                    def __getattr__(self, name):
+                        return getattr(tx, name)
 
-        self.store._insert_package = explode
-        with self.assertRaises(RuntimeError) as ctx:
-            self.store.create_package(
-                expense_id=expense.id, name="足球课", kind="per_class", class_count=5
-            )
+                    def execute(self, sql, params=None):
+                        if "INSERT INTO class_packages" in sql:
+                            raise boom
+                        return tx.execute(sql, params)
+
+                yield Proxy()
+
+        self.store.db.tx = failing_tx
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                self.store.create_package(
+                    expense_id=expense.id, name="足球课", kind="per_class",
+                    class_count=5,
+                )
+        finally:
+            self.store.db.tx = real_tx
         self.assertIs(ctx.exception, boom)
+
+    def test_a_class_count_that_is_not_a_real_number_is_refused(self):
+        """int(nan) raises a bare ValueError the API does not catch, so this
+        was a 500 rather than a 400. Same for an unbounded count, which
+        reaches the driver as an OverflowError."""
+        expense = self.store.create(date="2026-08-03", amount=100)
+        for bad in (float("nan"), float("inf"), float("-inf"), 10 ** 20, 2 ** 63):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValidationError):
+                    self.store.create_package(
+                        expense_id=expense.id, name="足球课", kind="per_class",
+                        class_count=bad,
+                    )
 
     def test_the_database_refuses_to_orphan_a_package(self):
         """The app-level guard makes this unreachable normally; the FK is the

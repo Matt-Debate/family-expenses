@@ -140,6 +140,32 @@ with a probe proving it produced a genuinely wrong number.
   foreign key, `class_count > 0`, and both kind allow-lists.
 - `PackageNotFoundError` landed in three call sites and only one was pinned.
 
+### Fixed after the third review round
+The rule from round two — derive a part from the total, never a total from its
+parts — was written into a comment but not actually implemented at the boundary.
+`value(count)` is `round(amount * count / count, 2)`, which is **not** reliably
+`round(amount, 2)`: an amount sitting on a half-cent crosses the tie differently
+on the multiply/divide round trip. So a ¥100.035 payment over 6 classes still
+reported **¥100.04 owed against ¥100.03 paid**, and the comment asserted that
+was impossible.
+
+- `value(n)` now returns the total at `n >= count` — the cap holds by
+  construction rather than by assertion. `max(0.0, …)` on `remaining_amount`
+  turned out to be masking the same defect rather than guarding anything.
+- **The sweep's amounts were all exact 2-decimal values** while its own comment
+  claimed "half-cent boundaries". Six third-decimal amounts added; they fail
+  immediately against the old arithmetic.
+- **An unbounded `class_count` reached the driver as an `OverflowError`** and
+  became a 500, the same shape as the NaN case. Capped at 1000.
+- **Tapping a course row silently reset the add form's payment picker**, so the
+  next course could be linked to whichever payment happened to be listed first.
+- `ClassRowRenderingTests` runs the real `renderClasses` and inspects its HTML:
+  forcing every row closed — no buttons, no class log, permanently — passed the
+  entire suite, because only the click half was executed.
+- Two guards were correct but unproven (P5): the `isfinite` check, and the
+  `if not _is_integrity_error(exc): raise` that keeps a dropped connection from
+  being reported as "already tracked". Both now fail when removed.
+
 ### Changed
 - `classes_log` validates the event kind **before** resolving which course was
   meant — a bad kind is wrong whichever course it is, and reporting "no such

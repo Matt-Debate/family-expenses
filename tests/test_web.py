@@ -789,6 +789,87 @@ class ClassLineRenderingTests(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
+class ClassRowRenderingTests(unittest.TestCase):
+    """Runs the real `renderClasses` and inspects the HTML it produces.
+
+    The click handler is covered separately, but the RENDER half was not:
+    forcing `isOpen` to false — so every course row shows no buttons and no
+    class log, permanently — left the whole suite green.
+    """
+
+    PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+
+    def render(self, open_ids: list) -> str:
+        import json
+
+        src = self.PORTAL.read_text(encoding="utf-8")
+        block = src[src.index("  function clsLine(p) {"):src.index("  function render() {")]
+        self.assertIn("function renderClasses()", block, "block markers moved")
+        package = {
+            "id": "p1", "name": "足球课", "period_label": "8月",
+            "kind": "per_class", "events": [
+                {"id": "e1", "date": "2026-08-05", "kind": "attended",
+                 "logged_by": "wife", "note": None},
+            ],
+            "summary": {"remaining": 9, "class_count": 10, "rate": 220.0,
+                        "used": 1, "overrun": 0, "remaining_amount": 1980.0},
+        }
+        harness = f"""
+var packages = [{json.dumps(package)}];
+var candidates = [{{"id":"x1","description":"足球课","amount":2200,"date":"2026-08-03","category":"aden-sports"}}];
+var openPkgs = {json.dumps({i: True for i in open_ids})};
+var lang = "zh";
+var STR = {{zh: {{ev: {{attended:"上了", missed_school:"停课", missed_us:"没去"}}}}}};
+var out = {{}};
+function $(id) {{ return {{ innerHTML: "", set: null, value: "",
+  get selectedOptions() {{ return []; }},
+  textContent: "" }}; }}
+var nodes = {{}};
+$ = function (id) {{ if (!nodes[id]) nodes[id] = {{innerHTML:"", value:"", textContent:""}};
+  return nodes[id]; }};
+function esc(s) {{ return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {{
+  return {{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}}[c]; }}); }}
+function t(k) {{ return k; }}
+function money(n) {{ return "¥" + Number(n).toFixed(2); }}
+function money0(n) {{ return "¥" + Math.round(Number(n)); }}
+function categoryLabel(e) {{ return e.category || ""; }}
+"""
+        script = (harness + block
+                  + '\nrenderClasses();\nconsole.log(nodes["classesBody"].innerHTML);\n')
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out.stdout
+
+    def test_a_closed_row_hides_its_controls_and_log(self):
+        html = self.render(open_ids=[])
+        self.assertIn('class="btns" hidden=""', html)
+        self.assertIn('class="histbox" hidden=""', html)
+        self.assertNotIn('class="item open"', html)
+
+    def test_an_open_row_shows_its_controls_and_log(self):
+        """Forcing isOpen to false here made the entire tab inert."""
+        html = self.render(open_ids=["p1"])
+        self.assertIn('class="item open"', html)
+        self.assertIn('class="btns">', html)      # no hidden attribute
+        self.assertIn('class="histbox">', html)
+        self.assertIn("2026-08-05", html)         # the class log is rendered
+        self.assertIn("data-unlog=", html)        # ...with its remove control
+
+    def test_the_row_renders_the_course_and_its_figures(self):
+        html = self.render(open_ids=["p1"])
+        self.assertIn("足球课", html)
+        self.assertIn("8月", html)
+        self.assertIn("9/10", html)
+        self.assertIn("¥1980.00", html)
+
+    def test_a_course_with_no_classes_logged_still_renders(self):
+        src = self.PORTAL.read_text(encoding="utf-8")
+        self.assertIn('<div class="hist">–</div>', src,
+                      "an empty class log needs a placeholder row")
+
+
+@unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
 class ClassTabInteractionTests(unittest.TestCase):
     """Executes the Classes tab's click handler against a stub DOM.
 

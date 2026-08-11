@@ -598,6 +598,14 @@ class Store:
             )
         if count < 1:
             raise ValidationError(f"class_count must be at least 1, got {count}")
+        if count > 1000:
+            # no course has a thousand classes, and an unbounded value reaches
+            # the driver as an OverflowError, which the API layer does not
+            # translate — the same 500-instead-of-400 the NaN guard closed
+            raise ValidationError(
+                f"class_count {count} is not a plausible number of classes "
+                "(maximum 1000)"
+            )
         return count
 
     @staticmethod
@@ -651,7 +659,20 @@ class Store:
         total = round(amount, 2)
 
         def value(n: int) -> float:
-            return round(amount * n / count, 2) if count else 0.0
+            """The exact ratio for n classes — except at the top, where it IS
+            the total.
+
+            `round(amount * count / count, 2)` is not reliably `round(amount, 2)`:
+            an amount sitting on a half-cent (a third decimal of 5) crosses the
+            tie differently on the multiply/divide round trip, and the whole
+            package then reports a cent more than was paid. Returning `total`
+            at the boundary makes the cap true by construction instead of by
+            assertion — the previous version claimed exactly this in a comment
+            and did not do it.
+            """
+            if not count:
+                return 0.0
+            return total if n >= count else round(amount * n / count, 2)
 
         out: dict[str, Any] = {
             "class_count": count,
