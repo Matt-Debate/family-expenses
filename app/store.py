@@ -194,22 +194,46 @@ def _household_now() -> datetime:
         return datetime.now(timezone.utc)
 
 
+def _seconds_until_midnight_from(now: datetime) -> int:
+    """Whole seconds from `now` until the household's next midnight.
+
+    Subtracting two aware datetimes that carry the SAME ZoneInfo does
+    wall-clock arithmetic, which is an hour wrong either side of a DST change.
+    Shanghai has no DST, but APP_TZ is configurable and a helper that is only
+    correct for one zone is a trap. Both sides are converted to UTC first, so
+    the answer is real elapsed time.
+
+    ceil, not truncate: int() lands a fraction of a second BEFORE midnight, and
+    the page would roll the date over that much early.
+    """
+    midnight = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    delta = midnight.astimezone(timezone.utc) - now.astimezone(timezone.utc)
+    return max(1, ceil(delta.total_seconds()))
+
+
+def today_and_midnight() -> tuple[str, int]:
+    """The household's date AND how much of it is left, from ONE clock read.
+
+    Read separately, a request straddling midnight returns yesterday's date
+    beside a nearly-whole-day countdown — which tells the page to keep offering
+    yesterday for another day, the exact defect the countdown exists to fix.
+    """
+    now = _household_now()
+    return now.strftime("%Y-%m-%d"), _seconds_until_midnight_from(now)
+
+
 def seconds_until_midnight() -> int:
-    """Whole seconds from now until the household's next midnight.
+    """Whole seconds until the household's next midnight.
 
     The portal extrapolates `today` from elapsed time while a page stays open.
     Elapsed time alone rolls the date over 24h after the response rather than
     at midnight, so a page loaded at 23:50 kept offering yesterday for almost
-    a whole day. It cannot work this out for itself: the server sends a DATE,
-    which says nothing about how much of it is left.
+    a whole day. It cannot work this out for itself: a DATE says nothing about
+    how much of it is left.
     """
-    now = _household_now()
-    midnight = (now + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    # ceil, not truncate: int() lands a fraction of a second BEFORE midnight,
-    # so the page would roll the date over that much early
-    return max(1, ceil((midnight - now).total_seconds()))
+    return _seconds_until_midnight_from(_household_now())
 
 
 def today_str() -> str:

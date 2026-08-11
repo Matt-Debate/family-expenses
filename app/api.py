@@ -12,8 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from .store import (
-    NotFoundError, Store, ValidationError, is_class_category,
-    seconds_until_midnight, today_str,
+    NotFoundError, Store, ValidationError, is_class_category, today_and_midnight,
 )
 
 
@@ -78,8 +77,10 @@ def api_list(store: Store, body: dict) -> tuple[int, dict]:
     )
     # read the clock ONCE: computing it separately for the summary and for the
     # response let a request straddling midnight bucket its rows against one
-    # day and label them with the next
-    today = today_str()
+    # day and label them with the next. The remaining-seconds figure has to
+    # come from that same reading — yesterday's date beside a whole day left
+    # tells the page to hold yesterday for another day.
+    today, midnight_in = today_and_midnight()
     return 200, {
         "ok": True,
         "expenses": [e.to_dict() for e in expenses],
@@ -94,7 +95,7 @@ def api_list(store: Store, body: dict) -> tuple[int, dict]:
         # …and how much of it is left, so the page can roll the date over AT
         # midnight rather than 24h after this response. A date alone says
         # nothing about how much of the day remains.
-        "midnight_in": seconds_until_midnight(),
+        "midnight_in": midnight_in,
     }
 
 
@@ -162,6 +163,7 @@ def api_classes_list(store: Store, body: dict) -> tuple[int, dict]:
     # were actually courses. No date bound on top of that — a course payment
     # falls due in the future all the time, and that is the one most likely to
     # be tracked next.
+    cls_today, cls_midnight_in = today_and_midnight()   # one reading, as above
     linked = store.linked_expense_ids()
     candidates = [
         {"id": e.id, "date": e.date, "amount": e.amount,
@@ -171,7 +173,7 @@ def api_classes_list(store: Store, body: dict) -> tuple[int, dict]:
     ]
     return 200, {
         "ok": True, "packages": packages, "candidates": candidates,
-        "today": today_str(), "midnight_in": seconds_until_midnight(),
+        "today": cls_today, "midnight_in": cls_midnight_in,
     }
 
 

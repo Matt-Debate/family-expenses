@@ -191,8 +191,41 @@ more, three of which the earlier rounds had looked straight at.
   which is exactly what two terms bought in one sitting look like. The package
   id is appended, but only where the visible text actually collides.
 
+### Fixed after the cross-model round was itself reviewed
+The fix wave above was sent back to Codex rather than trusted — this release's
+first three fix waves were each defective, so "fixed" is not a verified state.
+It found three more blockers, two of them created by those fixes.
+
+- **The pin froze what it was meant to synchronise.** Storing today into
+  `clsDates` when an open row rendered did make the box and the tap agree — by
+  making both permanently wrong: a row opened at 23:50 showed and logged
+  yesterday for the rest of the page's life, immune even to a refresh. And the
+  regression test written for it constructed a state the renderer could no
+  longer produce, so it could not have caught this. **The box itself is now the
+  source of truth** — the tap posts exactly the date she can see, `clsDates`
+  only carries a pick across a re-render, and `renderClasses()` is a pure
+  repaint again. This also removes the original hole for free: no `change`
+  event is needed to notice a date, because nothing is inferred from events.
+- **`today` and `midnight_in` came from two separate clock readings**, so a
+  request straddling midnight returned yesterday's date beside a nearly full
+  day remaining — telling the page to hold yesterday for another day, which is
+  the exact defect the countdown was added to fix. One reading now
+  (`store.today_and_midnight`). The "clock read exactly once" test had been
+  patching `today_str` rather than the clock, so it reported one read while the
+  wall clock was read twice.
+- **The uniqueness handle was not unique**: four characters of a twelve-character
+  id, so two ids sharing a prefix collided again. Full id now.
+- `clsBusy` could hold a course for the life of the page if a request never
+  settled (neither `.then` nor `.catch` runs) — released after 30s as a
+  backstop. The post-log reset was also value-guarded, so changing away and back
+  to the same date during an in-flight log erased that choice; it is guarded on
+  a pick counter now.
+- `seconds_until_midnight()` did wall-clock arithmetic, an hour out either side
+  of a DST change for any `APP_TZ` other than Shanghai. Both sides are converted
+  to UTC first.
+
 ### Tests
-250 → 316, and two review rounds closed three long-standing coverage gaps:
+250 → 323, and two review rounds closed three long-standing coverage gaps:
 **BACKLOG §4 is closed** — both form-submit handlers now run under node, the
 class one (`addClsForm`) and the expense one (`addForm`, live since v0.1 and the
 one that writes money directly). All four mutations §4 named as surviving are
@@ -202,14 +235,17 @@ have a top-level key-parity guard (deleting an English key left the whole suite
 green, and the dialog then reads the literal key), and the whole-course delete
 confirm is driven by a test rather than only its endpoint.
 
-Seventy-one mutations were applied to the new code — the filter deleted,
+Eighty-four mutations were applied to the new code — the filter deleted,
 the category match made exact, the period box pinned open and pinned shut, the
 cleared field left populated, the picker ignored, a blank date posted as-is, the
 picker tap left toggling, the confirm removed, Cancel ignored, the remembered
 date forgotten, the confirm's subject dropped, a typo in `CLASS_CATEGORIES`, the
 payment stripped from the MCP candidates and the payment description dropped
 from the matcher, plus the eleven covering the review fixes above — and every
-one is caught. The `change` listener that records a picked date had no executing
+one is caught — including five re-run after an audit found a mutation whose
+target test had been renamed: `unittest` exits non-zero for a name that does
+not resolve, so those had scored as "caught" without running anything. One of
+them genuinely survived. The `change` listener that records a picked date had no executing
 test at all in the first cut; a key/value swap in it kept every token the wiring
 guard greps for while making the memory silently never work. `ClassPeriodFieldTests` and the extended
 `ClassTabInteractionTests` execute the portal's own JS under node rather than

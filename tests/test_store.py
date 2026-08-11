@@ -435,6 +435,43 @@ class HouseholdMidnightTests(unittest.TestCase):
             now.strftime("%Y-%m-%d"),
         )
 
+    def test_it_is_real_elapsed_time_across_a_DST_change(self):
+        """Subtracting two aware datetimes carrying the SAME ZoneInfo does
+        WALL-CLOCK arithmetic, which is an hour wrong either side of a DST
+        transition. Shanghai has no DST, but APP_TZ is configurable and a
+        helper correct in exactly one zone is a trap for whoever changes it.
+        """
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from app.store import _seconds_until_midnight_from
+
+        ny = ZoneInfo("America/New_York")
+        for label, now, expected in [
+            # 2026-03-08: clocks go FORWARD at 02:00, so this day is 23h long
+            ("spring forward", datetime(2026, 3, 8, 12, 0, tzinfo=ny), 12 * 3600),
+            # 2026-11-01: clocks go BACK at 02:00, so this day is 25h long
+            ("fall back", datetime(2026, 11, 1, 12, 0, tzinfo=ny), 12 * 3600),
+        ]:
+            with self.subTest(label):
+                # noon → next midnight is 12h of REAL time on both days: the
+                # transition happened before noon in each case
+                self.assertEqual(_seconds_until_midnight_from(now), expected)
+
+    def test_it_counts_the_extra_hour_when_the_day_is_longer(self):
+        """The transition AHEAD of the remaining window is where wall-clock
+        arithmetic actually differs — 25 real hours read as 24."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from app.store import _seconds_until_midnight_from
+
+        ny = ZoneInfo("America/New_York")
+        # 2026-11-01 00:30 EDT, before the 02:00 fall-back: 24h30m of real time
+        # remain until midnight, not 23h30m
+        now = datetime(2026, 11, 1, 0, 30, tzinfo=ny, fold=0)
+        self.assertEqual(_seconds_until_midnight_from(now), 24 * 3600 + 1800)
+
     def test_it_follows_APP_TZ(self):
         """A UTC server answering a China household is the reason any of this
         exists — the remaining seconds must be the household's, not the box's."""

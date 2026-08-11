@@ -395,13 +395,16 @@
   var summary = {};
   var packages = [];    // class tracker, loaded by refreshClasses()
   var openPkgs = {};     // which courses are expanded, across re-renders
-  // The date each open course's picker is set to — pinned by clsDateFor() so
-  // the box on screen and the date a tap posts are the same value, never two
-  // evaluations of `|| todayStr()` taken moments apart. Empty ⇒ today.
+  // A date she has explicitly picked, per course. It exists ONLY so the pick
+  // survives the re-render another row's tap causes — it never decides what
+  // gets logged; the box does. Empty ⇒ the box shows today.
   var clsDates = {};
   // which courses have a log request in flight. Outside the DOM on purpose:
   // a re-render replaces a disabled button with an enabled one.
   var clsBusy = {};
+  // bumped on every pick, so an in-flight log can tell "she has chosen since"
+  // from "the date merely looks the same" — changing away and back matters
+  var clsPickSeq = {};
   var candidates = [];  // payments not yet tracked by a package
 
   function t(key) { var v = STR[lang][key]; return typeof v === "string" ? v : key; }
@@ -1088,15 +1091,22 @@
     var n = {};
     labels.forEach(function (l) { n[l] = (n[l] || 0) + 1; });
     return labels.map(function (l, i) {
-      return n[l] > 1 ? l + " · " + esc(String(ids[i]).slice(0, 4)) : l;
+      // the FULL id, not a fragment: ids are 12 hex characters and two of
+      // them can share any prefix, so a 4-char slice left two courses reading
+      // alike — the wrong-course log this exists to prevent. It is also the
+      // handle the MCP falls back to, so she can read it out to the owner.
+      return n[l] > 1 ? l + " · " + esc(String(ids[i])) : l;
     });
   }
 
   function clsDateFor(p) {
-    // Pin an open row's date so the box and the tap read ONE value. Only open
-    // rows: a closed row's picker is hidden and unreachable, and pinning every
-    // package would freeze dates she has never looked at.
-    if (openPkgs[p.id] && !clsDates[p.id]) clsDates[p.id] = todayStr();
+    // What the box shows: her pick if she made one, otherwise today — computed
+    // fresh, so any re-render after midnight corrects an untouched row.
+    // An earlier attempt PINNED today here instead. That did make the box and
+    // the tap agree, by freezing them: a row opened at 23:50 then showed and
+    // logged yesterday for the rest of the page's life, immune even to a
+    // refresh. The box being the single source of truth is what makes them
+    // agree now (see the log handler), not a stored copy.
     return clsDates[p.id] || todayStr();
   }
 
@@ -1274,7 +1284,9 @@
     // leaving "" to fall through to today at tap time — the box would then
     // read blank while the tap wrote a date.
     if (!dateEl.value) dateEl.value = todayStr();
-    clsDates[itemEl.getAttribute("data-pkg")] = dateEl.value;
+    var pkg = itemEl.getAttribute("data-pkg");
+    clsDates[pkg] = dateEl.value;
+    clsPickSeq[pkg] = (clsPickSeq[pkg] || 0) + 1;
   });
 
   $("addClsForm").addEventListener("submit", function (ev) {
@@ -1333,13 +1345,14 @@
         .catch(function (e) { toast(e.message); });
       return;
     }
-    // clsDates is the ONE record of "she committed a date" — the change
-    // listener writes it and nothing else does. Reading the input instead
-    // cannot tell an untouched picker from a deliberate pick of the date the
-    // row happens to be showing, and it survives the delete below, so a second
-    // tap before the refresh lands would reuse it. Unset ⇒ recompute today,
-    // which is also what makes a row left open across midnight log today.
-    var d = clsDates[id] || todayStr();
+    // THE BOX IS THE SOURCE OF TRUTH: post exactly the date she can see. Any
+    // other rule — a stored copy, an inference from what the row was seeded
+    // with — is a second value that can drift from the one on screen, and
+    // every version of this that drifted did so silently. `clsDates` exists
+    // only so a pick survives the re-render another row's tap causes; it never
+    // decides what gets written. An emptied box reads "" and falls back.
+    var dateEl = itemEl.querySelector(".c-date");
+    var d = (dateEl && dateEl.value) || todayStr();
     // One log at a time PER COURSE, and the lock lives outside the DOM: a
     // disabled button is replaced by an enabled one the moment anything
     // re-renders, and it never covered the sibling buttons at all — so 停课
@@ -1348,20 +1361,23 @@
     if (clsBusy[id]) return;
     clsBusy[id] = true;
     b.disabled = true;
+    // a fetch that never settles calls neither .then nor .catch, and the lock
+    // would then hold this course for the life of the page — reload the only
+    // way out. Past 30s the request is dead in any sense she cares about.
+    setTimeout(function () { clsBusy[id] = false; }, 30000);
+    var seq = clsPickSeq[id] || 0;
     api("classes-log", {package_id:id, kind:act, date:d})
       .then(function () {
-        // Back to today, in the memory AND in the box, so the next tap cannot
-        // silently reuse this one's date. Not `delete`: refreshClasses()
-        // repaints only if its own request succeeds, and an unpinned open row
-        // would then show one date and post another.
-        // Guarded on `d` because a slow request outlives its own context —
-        // she may have picked the NEXT date while this one was in flight, and
-        // that choice must survive. The box is re-found by id rather than
-        // through the captured row, which a re-render has already detached.
-        if (clsDates[id] === d) {
-          clsDates[id] = todayStr();
+        // Back to today, in the box AND in the memory, so the next tap cannot
+        // silently reuse this one's date. Guarded on the PICK COUNTER, not on
+        // the date's value: a slow request outlives its own context, and she
+        // may have chosen since — including choosing this same date again,
+        // which value equality reads as "nothing happened". The box is re-found
+        // by id, because a re-render has already detached the row we captured.
+        if ((clsPickSeq[id] || 0) === seq) {
+          delete clsDates[id];
           var live = document.getElementById("c-date-" + id);
-          if (live) live.value = clsDates[id];
+          if (live) live.value = todayStr();
         }
         toast(t("cls_logged") + " · " + d); refreshClasses();
       })

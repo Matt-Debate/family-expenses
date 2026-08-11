@@ -482,6 +482,26 @@ class AgentErgonomicsTests(unittest.TestCase):
         self.assertNotEqual(result["candidates"][0]["package_id"],
                             result["candidates"][1]["package_id"])
 
+    def test_the_extra_candidate_fields_carry_real_data(self):
+        """When two same-named packs are NOT identical, `classes_logged` is what
+        separates them — and the sibling test above cannot see it, because its
+        fixture is the case where every field matches by construction."""
+        paid = [self.call("expenses_add", amount="2200", description="足球课")["id"]
+                for _ in range(2)]
+        first = self.call("classes_add", name="足球课", class_count=10,
+                          expense_id=paid[0])["id"]
+        self.call("classes_log", kind="attended", package_id=first)
+        self.call("classes_add", name="足球课", class_count=10, expense_id=paid[1])
+
+        result = self.call("classes_log", kind="attended", query="足球课")
+        by_id = {c["package_id"]: c for c in result["candidates"]}
+        self.assertEqual(by_id[first]["classes_logged"], 1)
+        self.assertEqual(
+            [c["classes_logged"] for c in result["candidates"] if c["package_id"] != first],
+            [0])
+        for candidate in result["candidates"]:
+            self.assertRegex(candidate["started"], r"^\d{4}-\d{2}-\d{2}T")
+
     def test_the_summary_note_names_a_pack_that_has_no_period_label(self):
         """P3: the note is the channel the agent reads back to the owner. Two
         label-less packs both reading "足球课 (—)" answers 还剩几节课 with a

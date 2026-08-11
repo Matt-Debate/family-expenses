@@ -60,11 +60,14 @@ derived at read time. `Store.summarize_package(package, amount, events)` is the 
 of that arithmetic, amounts are exact ratios (never a rounded rate × n), and
 logging a class moves no expense total — consumption is not spending.
 
-**P5 — Verify that your edit landed.**
+**P5 — Verify that your edit landed, and that your check could have failed.**
 Scripted string replacements here have twice reported success and changed
 nothing, and both times the full suite still passed because the affected path was
 short-circuited. Assert your anchors; re-read the file; prove a new guard fails
-before trusting that it passes.
+before trusting that it passes. When mutation-testing a guard, assert the target
+test **exists and passes** before applying the mutation — `unittest` exits
+non-zero for a name that does not resolve, so a renamed or mistyped target reads
+as "caught". One did, and the mutation behind it turned out to survive.
 
 **P6 — Verify anything that arrives from outside before installing it.**
 A design handoff once carried an in-memory demo backend reachable at
@@ -90,7 +93,7 @@ transcript, a commit, or a doc. Pipe secrets straight into env vars
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 316 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 323 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 PORTAL_DEV_RELOAD=1 python3 -m app.main   # …and re-read portal.html per request
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link

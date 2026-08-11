@@ -406,16 +406,29 @@ class ServerDecidesTodayTests(unittest.TestCase):
             calls.append(1)
             return "2026-08-11"
 
-        api_real, store_real = api_module.today_str, store_module.today_str
-        api_module.today_str = counting_today
-        store_module.today_str = counting_today
+        # patch the CLOCK, not today_str: `today` and `midnight_in` were read
+        # through two different helpers, so counting today_str calls said "1"
+        # while the wall clock had been read twice. A request straddling
+        # midnight then returned yesterday beside a whole day remaining, which
+        # tells the page to hold yesterday for another day.
+        from datetime import datetime, timezone
+
+        def counting_clock():
+            calls.append(1)
+            return datetime(2026, 8, 11, 23, 50, tzinfo=timezone.utc)
+
+        real = store_module._household_now
+        store_module._household_now = counting_clock
         try:
             r = self.client.post("/api/list", json={"token": self.token})
         finally:
-            api_module.today_str = api_real
-            store_module.today_str = store_real
-        self.assertEqual(r.json()["today"], "2026-08-11")
+            store_module._household_now = real
+        body = r.json()
+        self.assertEqual(body["today"], "2026-08-11")
+        self.assertEqual(body["midnight_in"], 600)
         self.assertEqual(len(calls), 1, f"clock read {len(calls)} times, expected 1")
+
+        del api_module, counting_today   # the old patch targets, now unused
 
     def test_the_response_says_how_much_of_today_is_left(self):
         """Without it the page rolls the date over 24h after the response
@@ -1009,19 +1022,32 @@ function categoryLabel(e) {{ return e.category || ""; }}
         self.assertIn('<option value="">', html)
         self.assertIn("cls_no_payment", html)
 
-    def test_an_open_row_pins_its_date_so_the_box_and_the_tap_agree(self):
-        """Without the pin, the box shows `clsDates[id] || todayStr()` at render
-        and a tap computes the same expression again later — two evaluations
-        that drift apart across midnight, and that cannot see a re-pick of the
-        date already displayed (no `change` event fires when the value does not
-        change). Pinning makes them one variable."""
-        state = self.render(open_ids=["p1"], read="JSON.stringify(clsDates)")
-        self.assertEqual(json.loads(state), {"p1": "2026-08-11"})
+    def test_a_re_render_moves_an_untouched_row_on_to_the_new_day(self):
+        """An earlier fix PINNED today into clsDates when an open row rendered.
+        The box and the tap did then agree — by freezing: a row opened at 23:50
+        showed and logged yesterday for the rest of the page's life, and no
+        refresh could correct it. The default has to be recomputed."""
+        html = self.render(
+            open_ids=["p1"],
+            # render once before midnight — which is what seeded the pin — then
+            # let the day turn and render again. One render cannot show this.
+            read='(function () { todayStr = function () { return "2026-09-01"; };'
+                 ' renderClasses(); return nodes["classesBody"].innerHTML; })()')
+        self.assertIn('class="c-date" id="c-date-p1" value="2026-09-01"', html)
 
-    def test_a_closed_row_is_not_pinned(self):
-        """Its picker is hidden and unreachable; pinning every package would
-        freeze dates she has never looked at."""
-        state = self.render(open_ids=[], read="JSON.stringify(clsDates)")
+    def test_a_re_render_does_not_move_a_date_she_chose(self):
+        """The other half: a pick survives the re-render another row's tap
+        causes, which is the only reason the map exists."""
+        html = self.render(open_ids=["p1"], seed="""
+clsDates = {p1: "2026-07-02"};
+todayStr = function () { return "2026-09-01"; };
+""")
+        self.assertIn('class="c-date" id="c-date-p1" value="2026-07-02"', html)
+
+    def test_rendering_records_nothing_of_its_own(self):
+        """renderClasses() is a repaint. When it also wrote to clsDates, the
+        write outlived every later correction."""
+        state = self.render(open_ids=["p1"], read="JSON.stringify(clsDates)")
         self.assertEqual(json.loads(state), {})
 
     def test_courses_whose_payments_also_read_alike_get_a_handle(self):
@@ -1061,6 +1087,20 @@ candidates = [
         self.assertEqual(len(options), 2)
         self.assertNotEqual(options[0], options[1],
                             "two payments render the same option text")
+
+    def test_two_courses_whose_ids_share_a_prefix_still_differ(self):
+        """The handle was four characters of a twelve-character id, so two ids
+        sharing a prefix produced the same label again — the wrong-course log
+        this exists to prevent, reachable through the fix for it."""
+        html = self.render(open_ids=[], seed="""
+packages[0].period_label = null;
+packages[0].id = "abcd11111111";
+packages[1] = JSON.parse(JSON.stringify(packages[0]));
+packages[1].id = "abcd22222222";
+""")
+        titles = re.findall(r'<div class="ex-desc">(.*?)</div>', html)
+        self.assertEqual(len(titles), 2, html)
+        self.assertNotEqual(titles[0], titles[1], "a shared id prefix still collides")
 
     def test_two_same_named_courses_do_not_render_identically(self):
         """The shape this release now produces exclusively: the portal stopped
@@ -1264,7 +1304,10 @@ class ClassTabInteractionTests(unittest.TestCase):
         harness = """
 var openPkgs = {}, logged = [], rendered = 0, apiCalls = [];
 var clsDates = {};   // empty = she has not touched any picker
-var clsBusy = {};
+var clsBusy = {}, clsPickSeq = {};
+var timers = [];
+function setTimeout(fn, ms) { timers.push({fn: fn, ms: ms}); return timers.length; }
+function fireTimers() { var ts = timers; timers = []; ts.forEach(function (x) { x.fn(); }); }
 var PKG = "p1";
 // the log handler re-finds the live picker by id, because a re-render has
 // already replaced the node it captured when the request began
@@ -1313,7 +1356,7 @@ $ = function () { return {addEventListener: function (_e, fn) { handlerFn = fn; 
                   + "\nconsole.log(JSON.stringify({openPkgs: openPkgs, "
                     "rendered: rendered, apiCalls: apiCalls, "
                     "confirms: confirms, clsDates: clsDates, toasts: toasts, "
-                    "picker: dateEl.value, "
+                    "picker: dateEl.value, busy: clsBusy, "
                     "disabled: button.disabled}));\n")
         out = subprocess.run(["node", "-e", script], capture_output=True,
                              text=True, timeout=30)
@@ -1393,41 +1436,37 @@ var ev = {target: {closest: function (sel) {
 handlerFn(ev);
 """
 
-    def test_the_logged_date_is_the_one_she_picked(self):
-        """Reading todayStr() instead of her pick ignores what she chose and
-        dates every backfilled class today — a silently wrong class log."""
-        state = self.run_handler('clsDates[PKG] = "2026-07-02";\n' + self.LOG_TAP)
+    def test_the_logged_date_is_the_one_in_the_box(self):
+        """The box is what she can see, so it is what must be written."""
+        state = self.run_handler('dateEl.value = "2026-07-02";\n' + self.LOG_TAP)
         self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-07-02")
 
-    def test_a_cleared_picker_falls_back_to_today(self):
-        """A date input cleared by hand fires change with "" — posting that is
-        a 400, and on a phone an empty box is easy to leave behind."""
-        state = self.run_handler('clsDates[PKG] = "";\n' + self.LOG_TAP)
+    def test_a_cleared_box_falls_back_to_today(self):
+        """A date input cleared by hand reads "" — posting that is a 400, and
+        on a phone an empty box is easy to leave behind."""
+        state = self.run_handler('dateEl.value = "";\n' + self.LOG_TAP)
         self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-11")
 
-    def test_a_row_left_open_across_midnight_still_logs_today(self):
-        """A row stays open across re-renders, and the picker's value was baked
-        into the DOM by the LAST render. Trusting that value posts yesterday for
-        a class that happened today — the stale-date bug v0.9.0 already had to
-        fix once, moved from the add form into the class log.
-        """
-        state = self.run_handler(
-            # the DOM still shows what yesterday's render seeded; she has
-            # touched nothing, so clsDates is empty and today is recomputed
-            'dateEl.value = "2026-08-10";\n' + self.LOG_TAP)
-        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-11")
-
-    def test_picking_the_date_the_row_already_shows_is_still_a_choice(self):
-        """Inferring the pick from the DOM cannot separate "untouched" from
-        "picked exactly what is on screen" — and after midnight what is on
-        screen is yesterday. She picks yesterday, sees yesterday, and it files
-        under today; re-picking does not help, because nothing re-renders.
+    def test_it_writes_the_date_on_screen_even_when_no_change_event_fired(self):
+        """`<input type="date">` fires NO change event when you re-pick the
+        value it already shows, so a rule that reads a stored pick discards
+        that choice and writes something else. Reading the box cannot: the
+        date she sees is the date that goes in, with no event required.
         """
         state = self.run_handler("""
-dateEl.value = "2026-08-10";      // yesterday's render, still on screen…
-clsDates[PKG] = "2026-08-10";     // …and she deliberately picked that date
+dateEl.value = "2026-08-10";   // on screen, and deliberately re-picked
+clsDates = {};                 // …so nothing was ever recorded
 """ + self.LOG_TAP)
         self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-10")
+
+    def test_a_stored_pick_never_overrides_what_the_box_shows(self):
+        """The two drifted apart in every earlier version of this. Whichever
+        way they disagree, the box wins — she cannot see the other one."""
+        state = self.run_handler("""
+dateEl.value = "2026-07-02";
+clsDates[PKG] = "2026-09-30";   // a stale copy, from any of the ways they drift
+""" + self.LOG_TAP)
+        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-07-02")
 
     def test_a_second_tap_before_the_refresh_lands_does_not_reuse_the_date(self):
         """Clearing the memory only changes what the NEXT render seeds. If the
@@ -1435,30 +1474,27 @@ clsDates[PKG] = "2026-08-10";     // …and she deliberately picked that date
         DOM — and the button re-enables before the refresh arrives, so a second
         tap reuses it. If that refresh fails, every later tap does.
         """
-        state = self.run_handler('clsDates[PKG] = "2026-07-02";\n'
+        state = self.run_handler('dateEl.value = "2026-07-02";\n'
                                  + self.LOG_TAP + self.LOG_TAP)
         dates = [c["body"]["date"] for c in state["apiCalls"]]
         self.assertEqual(dates, ["2026-07-02", "2026-08-11"],
                          "the backfill date survived its own log")
-        # back to today in the memory AND the box — not deleted, because an
-        # unpinned open row shows one date and posts another
-        self.assertEqual(state["clsDates"], {"p1": "2026-08-11"})
         self.assertEqual(state["picker"], "2026-08-11")
 
-    def test_the_picker_stops_showing_a_date_that_will_not_be_used(self):
-        """`delete clsDates[id]` changes what a tap POSTS; only a re-render
-        changes what the row SHOWS — and refreshClasses() repaints solely
-        inside its own `.then`. On a flaky link the row then reads 7月2日
-        permanently while every later tap posts today. The GFW is why this app
-        has no CDN; a request that does not come back is the normal case.
+    def test_the_box_returns_to_today_after_a_log(self):
+        """refreshClasses() repaints only inside its own `.then`, so on a flaky
+        link nothing else resets the row — and a backfill date left sitting in
+        the box is the next class filed under last month. The GFW is why this
+        app has no CDN; a request that does not come back is the normal case.
         """
         state = self.run_handler("""
 clsDates[PKG] = "2026-07-02";
-dateEl.value = "2026-07-02";   // as her pick left the DOM
+dateEl.value = "2026-07-02";   // as her pick left the box
 """ + self.LOG_TAP)
         self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-07-02")
         self.assertEqual(state["picker"], "2026-08-11",
-                         "the row still offers a date the next tap will ignore")
+                         "the row still offers the date it just used")
+        self.assertEqual(state["clsDates"], {}, "the pick outlived its log")
 
     def test_closing_a_row_drops_a_date_she_did_not_use(self):
         """The picker is hidden while the row is closed, so an abandoned pick
@@ -1490,19 +1526,40 @@ clsDates["p2"] = "2026-07-09";
         follows the first log must not take her newer choice with it."""
         state = self.run_handler("""
 pending = true;
-clsDates[PKG] = "2026-07-02";
+dateEl.value = "2026-07-02";
 """ + self.LOG_TAP + """
-clsDates[PKG] = "2026-07-09";   // her next pick, while the first is in flight
+// her next pick, while the first is still going — and deliberately the SAME
+// date, which a value-equality guard reads as "nothing has happened"
+dateEl.value = "2026-07-02";
+clsDates[PKG] = "2026-07-02";
+clsPickSeq[PKG] = (clsPickSeq[PKG] || 0) + 1;
 resolveLog();
 """)
         self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-07-02")
-        self.assertEqual(state["clsDates"], {"p1": "2026-07-09"},
+        self.assertEqual(state["picker"], "2026-07-02",
                          "the in-flight log reset a date she picked after it")
+        self.assertEqual(state["clsDates"], {"p1": "2026-07-02"})
+
+    def test_a_request_that_never_comes_back_releases_the_course(self):
+        """A fetch that never settles calls neither .then nor .catch, so the
+        lock would hold that course for the life of the page — reload the only
+        way out, on the tab she uses from a phone behind the GFW."""
+        state = self.run_handler("pending = true;\n" + self.LOG_TAP
+                                 + "fireTimers();\n" + self.LOG_TAP)
+        self.assertEqual(len(state["apiCalls"]), 2,
+                         "the course stayed locked after a dead request")
+
+    def test_the_lock_is_not_released_while_the_request_is_alive(self):
+        """The release is a backstop for a dead request, not a timer that
+        re-arms the button under a slow one."""
+        state = self.run_handler("pending = true;\n" + self.LOG_TAP + self.LOG_TAP)
+        self.assertEqual(len(state["apiCalls"]), 1)
+        self.assertEqual(state["busy"], {"p1": True})
 
     def test_the_toast_says_which_date_was_logged(self):
         """The one action here with no confirmation step. Naming the date is
         what makes a wrong one visible at the moment it happens."""
-        state = self.run_handler('clsDates[PKG] = "2026-07-02";\n' + self.LOG_TAP)
+        state = self.run_handler('dateEl.value = "2026-07-02";\n' + self.LOG_TAP)
         self.assertIn("2026-07-02", state["toasts"][-1])
 
     def test_opening_the_date_picker_does_not_close_the_row(self):
@@ -1542,12 +1599,13 @@ handlerFn(ev);
         start = src.index("  // the picker's date outlives the re-render")
         block = src[start:src.index('  $("addClsForm")')]
         self.assertIn("clsDates[", block, "block markers moved")
-        script = ("var clsDates = {}, handlerFn = null;\n"
+        script = ("var clsDates = {}, clsPickSeq = {}, handlerFn = null;\n"
                   'function todayStr() { return "2026-08-11"; }\n'
                   'var $ = function () { return {addEventListener:'
                   " function (_e, fn) { handlerFn = fn; }}; };\n"
                   + block + "\n" + driver
-                  + "\nconsole.log(JSON.stringify(clsDates));\n")
+                  + "\nconsole.log(JSON.stringify("
+                    "{dates: clsDates, seq: clsPickSeq}));\n")
         out = subprocess.run(["node", "-e", script], capture_output=True,
                              text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
@@ -1562,7 +1620,8 @@ handlerFn({target: {closest: function (sel) {
   if (sel === "[data-pkg]") return itemEl;
   return null; }}});
 """)
-        self.assertEqual(state, {"p1": "2026-07-02"})
+        self.assertEqual(state["dates"], {"p1": "2026-07-02"})
+        self.assertEqual(state["seq"], {"p1": 1}, "the pick was not counted")
 
     def test_emptying_the_box_puts_today_back_in_it(self):
         """A cleared date input reads "". Storing that leaves the box blank
@@ -1576,7 +1635,7 @@ handlerFn({target: {closest: function (sel) {
   if (sel === "[data-pkg]") return itemEl;
   return null; }}});
 """)
-        self.assertEqual(state, {"p1": "2026-08-11"})
+        self.assertEqual(state["dates"], {"p1": "2026-08-11"})
 
     def test_a_change_somewhere_else_in_the_row_is_ignored(self):
         """The listener is on the whole tab body, so every input in every course
@@ -1587,7 +1646,7 @@ handlerFn({target: {closest: function (sel) {
   if (sel === "[data-pkg]") return itemEl;
   return null; }}});
 """)
-        self.assertEqual(state, {})
+        self.assertEqual(state["dates"], {})
 
     def test_removing_a_class_record_asks_first(self):
         """A 12px × beside the class log, one mis-tap from erasing attendance —
