@@ -799,7 +799,7 @@ class ClassRowRenderingTests(unittest.TestCase):
 
     PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
 
-    def render(self, open_ids: list) -> str:
+    def render(self, open_ids: list, seed: str = "", read: str = None) -> str:
         import json
 
         src = self.PORTAL.read_text(encoding="utf-8")
@@ -827,6 +827,7 @@ function $(id) {{ return {{ innerHTML: "", set: null, value: "",
 var nodes = {{}};
 $ = function (id) {{ if (!nodes[id]) nodes[id] = {{innerHTML:"", value:"", textContent:""}};
   return nodes[id]; }};
+{seed}
 function esc(s) {{ return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {{
   return {{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}}[c]; }}); }}
 function t(k) {{ return k; }}
@@ -834,8 +835,9 @@ function money(n) {{ return "¥" + Number(n).toFixed(2); }}
 function money0(n) {{ return "¥" + Math.round(Number(n)); }}
 function categoryLabel(e) {{ return e.category || ""; }}
 """
+        read = read or 'nodes["classesBody"].innerHTML'
         script = (harness + block
-                  + '\nrenderClasses();\nconsole.log(nodes["classesBody"].innerHTML);\n')
+                  + "\nrenderClasses();\nconsole.log(" + read + ");\n")
         out = subprocess.run(["node", "-e", script], capture_output=True,
                              text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
@@ -863,10 +865,84 @@ function categoryLabel(e) {{ return e.category || ""; }}
         self.assertIn("9/10", html)
         self.assertIn("¥1980.00", html)
 
-    def test_a_course_with_no_classes_logged_still_renders(self):
+    def test_a_course_with_no_classes_logged_shows_a_placeholder(self):
+        """Was a grep for the literal — which also appears in the History tab,
+        so deleting the class-log branch entirely left it passing."""
+        html = self.render(
+            open_ids=["p1"],
+            seed='packages[0].events = [];',
+        )
+        self.assertIn('<div class="hist">–</div>', html)
+
+    def test_the_add_form_keeps_the_payment_she_picked(self):
+        """Every row tap re-renders the tab and rebuilds this select. Losing
+        the selection means the next course is linked to whichever payment
+        happens to be listed first."""
+        html = self.render(
+            open_ids=[],
+            seed='nodes["clsExpense"] = {innerHTML:"", value:"x1", textContent:""};',
+            read='nodes["clsExpense"].value',
+        )
+        self.assertEqual(html.strip(), "x1")
+
+    def test_the_rate_hint_divides_the_payment_by_the_class_count(self):
+        """The figure she reads when deciding whether the course is priced
+        right. Nothing referenced clsRateHint from the suite at all."""
+        html = self.render(
+            open_ids=[],
+            seed=('nodes["clsExpense"] = {innerHTML:"", value:"x1", textContent:""};'
+                  '\nnodes["clsCount"] = {innerHTML:"", value:"10", textContent:""};'),
+            read='nodes["clsRateHint"].textContent',
+        )
+        self.assertIn("¥220.00", html)     # 2200 / 10
+        self.assertNotIn("¥22000", html)
+
+
+@unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
+class ClassRefreshOrderingTests(unittest.TestCase):
+    """`refreshClasses` tags each fetch with a generation number.
+
+    Without it the older of two in-flight responses lands last and repaints
+    pre-log totals over post-log ones: she logs a class, watches the count go
+    down, then watches it go back up — and logs it again.
+    """
+
+    PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+
+    def test_a_slow_earlier_response_cannot_overwrite_a_newer_one(self):
+        import json
+
         src = self.PORTAL.read_text(encoding="utf-8")
-        self.assertIn('<div class="hist">–</div>', src,
-                      "an empty class log needs a placeholder row")
+        # start at the counter's declaration, not the function, so the slice
+        # carries the real `var clsGen` rather than a stub of it
+        block = src[src.index("  var clsGen = 0;"):
+                    src.index('  $("clsExpense").addEventListener')]
+        self.assertIn("function refreshClasses()", block, "block markers moved")
+        script = """
+var packages = [], candidates = [], serverToday = null, serverTodayAt = 0;
+var rendered = [];
+var resolvers = [];
+function renderClasses() { rendered.push(packages.length); }
+function toast() {}
+function api() {
+  return { then: function (f) { resolvers.push(f); return this; },
+           catch: function () { return this; } };
+}
+""" + block + """
+refreshClasses();                      // generation 1 (the slow one)
+refreshClasses();                      // generation 2 (the fresh one)
+resolvers[1]({packages: [1, 2], candidates: []});   // newer answers first
+resolvers[0]({packages: [1, 2, 3, 4], candidates: []});  // older lands late
+console.log(JSON.stringify({rendered: rendered, finalCount: packages.length}));
+"""
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        state = json.loads(out.stdout)
+        self.assertEqual(state["finalCount"], 2,
+                         "the stale response overwrote the newer one")
+        self.assertEqual(state["rendered"], [2],
+                         "the stale response should not have rendered at all")
 
 
 @unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")

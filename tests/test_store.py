@@ -1219,6 +1219,41 @@ class ClassTrackerTests(unittest.TestCase):
                     {"p": package["id"]},
                 )
 
+    def test_each_course_is_summarised_from_its_own_classes(self):
+        """list_packages loads every event in one query and groups them in
+        Python. Handing the whole set to each package makes a course she has
+        never attended report classes consumed — and every existing test had
+        either one package or no events, so nothing could see it."""
+        football_expense = self.store.create(
+            date="2026-08-03", amount=2200, description="足球课"
+        )
+        football = self.store.create_package(
+            expense_id=football_expense.id, name="足球课", kind="per_class",
+            class_count=10,
+        )
+        swim_expense = self.store.create(
+            date="2026-08-04", amount=1000, description="游泳课"
+        )
+        swim = self.store.create_package(
+            expense_id=swim_expense.id, name="游泳课", kind="per_class",
+            class_count=5,
+        )
+        for _ in range(3):
+            self.store.log_class(package_id=football["id"], kind="attended")
+
+        by_id = {p["id"]: p for p in self.store.list_packages()}
+        self.assertEqual(by_id[football["id"]]["summary"]["used"], 3)
+        self.assertEqual(by_id[swim["id"]]["summary"]["used"], 0,
+                         "a course with no classes logged reported some")
+        self.assertEqual(by_id[swim["id"]]["summary"]["remaining"], 5)
+        self.assertEqual(by_id[swim["id"]]["summary"]["remaining_amount"], 1000.0)
+        self.assertEqual(by_id[swim["id"]]["events"], [])
+        # and the single-package read agrees with the list
+        self.assertEqual(
+            self.store.package(swim["id"])["summary"],
+            by_id[swim["id"]]["summary"],
+        )
+
     def test_archived_packages_are_hidden_unless_asked_for(self):
         _expense, package = self.pack()
         self.store.update_package(package["id"], fields={"archived": True})

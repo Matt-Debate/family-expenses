@@ -166,6 +166,27 @@ was impossible.
   `if not _is_integrity_error(exc): raise` that keeps a dropped connection from
   being reported as "already tracked". Both now fail when removed.
 
+### Fixed after the fourth review round
+The first round to find **no MUST FIX**: the arithmetic was brute-forced over
+6.5 million combinations — every amount shape, counts 1–30, every event mix
+including large overruns — with zero invariant violations. What it did find was
+seven guards that were correct but unproven, one of them protecting a real
+defect:
+
+- **`list_packages` hands each course its own classes**, and nothing checked it.
+  It loads every event in one query and groups them in Python; giving the whole
+  set to each package makes a course she has never attended report classes
+  consumed and money spent. Every prior test had one package or no events, so
+  the grouping was invisible. The code was right; the guard was missing.
+- The add form's **rate hint** had no test at all — mutating its division to a
+  multiplication showed "¥22,000.00 (¥2200 ÷ 10)" on screen at the moment she
+  decides whether a course is priced right.
+- The **stale-response generation counter**, the **payment-picker preservation**
+  and the **empty class-log placeholder** were all unreferenced by the suite.
+- `test_a_course_with_no_classes_logged_still_renders` was a grep for a literal
+  that also appears in the History tab, so deleting the branch it named left it
+  passing. It now renders.
+
 ### Changed
 - `classes_log` validates the event kind **before** resolving which course was
   meant — a bad kind is wrong whichever course it is, and reporting "no such
