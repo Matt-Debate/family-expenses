@@ -382,7 +382,7 @@ class CodexVerifyRegressionTests(unittest.TestCase):
 
 
 class BacklogRegressionTests(unittest.TestCase):
-    """docs/BACKLOG.md §2–§4 — items filed as known-and-deferred, now closed.
+    """Items filed in docs/BACKLOG.md as known-and-deferred, now closed in v0.9.0.
 
     Each test was written against the unfixed code first and observed to fail;
     the entries in the backlog say what each defect actually costs.

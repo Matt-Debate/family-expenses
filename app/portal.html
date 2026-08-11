@@ -343,6 +343,7 @@
   // things. The device is only the fallback for the first paint.
   var serverToday = null;   // YYYY-MM-DD as of the last successful /api/list
   var serverTodayAt = 0;    // Date.now() when that arrived
+  var resyncing = false;    // one extrapolation-triggered refetch per page load
   function addDays(ymd, n) {
     // parsed and formatted in UTC on purpose: these are calendar dates, and a
     // local-time round trip across a DST boundary lands on the wrong day
@@ -357,9 +358,17 @@
       // left open overnight would keep offering yesterday as the payment date
       // — and an accepted default writes a wrong date into the ledger, which
       // then lands in the wrong month's paid total.
-      // This reads elapsed time, not the device's absolute date, so a phone
-      // set to the wrong DAY still gets the household's date.
+      // Elapsed time is a proxy for a date, not a date. It is only sound while
+      // the device clock runs at the right RATE: an NTP correction or a manual
+      // change mid-session reads as time passing. So the estimate is capped at
+      // one day and we go ask the server instead — an unbounded extrapolation
+      // would put a payment date in the FUTURE, the same wrong-month error
+      // arriving from the other side. Bounded to ±1 day either way.
       var days = Math.floor((Date.now() - serverTodayAt) / 86400000);
+      if (days > 1) {
+        days = 1;
+        if (!resyncing) { resyncing = true; refresh(); }  // once per page load
+      }
       return days > 0 ? addDays(serverToday, days) : serverToday;
     }
     var d = new Date();
@@ -937,7 +946,9 @@
           // an expense can be entered already-paid, which is a single 'create'
           // entry — without the date it carries, the trail would not say when
           // the money actually moved
-          var paidOn = (snap.paid && snap.paid_date)
+          // only on 'create': a mark_paid entry already says so in its action,
+          // and repeating it there reads as a duplicate
+          var paidOn = (h.action === "create" && snap.paid && snap.paid_date)
             ? " · " + esc(STR[lang].act.mark_paid) + " " + esc(snap.paid_date) : "";
           return '<div class="hist">' + esc(String(h.changed_at).replace("T", " ")) + " · " +
             esc(STR[lang].act[h.action] || h.action) +

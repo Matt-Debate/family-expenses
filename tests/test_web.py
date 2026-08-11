@@ -316,7 +316,7 @@ class DocumentedCountsTests(unittest.TestCase):
 
 
 class ServerDecidesTodayTests(unittest.TestCase):
-    """docs/BACKLOG.md §2 — the portal read the device clock for every date
+    """Backlog (closed in v0.9.0) — the portal read the device clock for every date
     decision while the server used APP_TZ, so the two could disagree."""
 
     def setUp(self):
@@ -359,6 +359,36 @@ class ServerDecidesTodayTests(unittest.TestCase):
     def test_returning_to_a_backgrounded_tab_resyncs(self):
         self.assertIn('document.addEventListener("visibilitychange"', self.portal)
 
+    def test_the_clock_is_read_exactly_once_per_list(self):
+        """Read twice, a request straddling midnight buckets its rows against
+        one day and labels them with the next. Counting the reads is the only
+        way to pin this — both values look right in isolation."""
+        from app import api as api_module
+        from app import store as store_module
+
+        calls = []
+
+        def counting_today():
+            calls.append(1)
+            return "2026-08-11"
+
+        api_real, store_real = api_module.today_str, store_module.today_str
+        api_module.today_str = counting_today
+        store_module.today_str = counting_today
+        try:
+            r = self.client.post("/api/list", json={"token": self.token})
+        finally:
+            api_module.today_str = api_real
+            store_module.today_str = store_real
+        self.assertEqual(r.json()["today"], "2026-08-11")
+        self.assertEqual(len(calls), 1, f"clock read {len(calls)} times, expected 1")
+
+    def test_history_shows_when_an_already_paid_row_was_paid(self):
+        """Collapsing create+mark_paid into one entry hid the payment date the
+        surviving row carries — the trail stopped saying when money moved."""
+        self.assertIn("h.action === \"create\" && snap.paid && snap.paid_date", self.portal)
+        self.assertIn("esc(snap.paid_date)", self.portal)  # P6: never interpolate raw
+
 
 @unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
 class PortalDateArithmeticTests(unittest.TestCase):
@@ -385,7 +415,8 @@ class PortalDateArithmeticTests(unittest.TestCase):
 
     def run_js(self, setup: str, expr: str) -> str:
         script = (
-            "var serverToday = null, serverTodayAt = 0;\n"
+            "var serverToday = null, serverTodayAt = 0, resyncing = false;\n"
+            "var refresh = function () { throw new Error('unexpected refetch'); };\n"
             + self.date_fns()
             + "\n" + setup + "\nconsole.log(String(" + expr + "));\n"
         )
@@ -411,6 +442,20 @@ class PortalDateArithmeticTests(unittest.TestCase):
         )
         self.assertEqual(self.run_js(setup, "todayStr()"), "2026-08-31")
 
+    def test_a_forward_clock_jump_cannot_push_the_date_into_the_future(self):
+        """Elapsed time is only a proxy for a date: an NTP correction or a
+        manual clock change mid-session reads as time passing. Unbounded, that
+        writes a payment date in a month that has not happened yet."""
+        for jump_days in (3, 40, 400):
+            with self.subTest(jump_days=jump_days):
+                setup = (
+                    'serverToday = "2026-08-31"; serverTodayAt = 0;\n'
+                    "refresh = function () {};\n"
+                    "Date.now = function () { return %d * 86400000 + 3600000; };"
+                    % jump_days
+                )
+                self.assertEqual(self.run_js(setup, "todayStr()"), "2026-09-01")
+
     def test_the_date_rolls_over_a_year_boundary(self):
         setup = (
             'serverToday = "2026-12-31"; serverTodayAt = 0;\n'
@@ -433,12 +478,16 @@ class PortalDateArithmeticTests(unittest.TestCase):
                 self.assertEqual(out.stdout.strip(), "2026-03-08 2026-11-02")
 
     def test_without_a_server_date_it_falls_back_to_the_device(self):
-        out = self.run_js("Date.now = function () { return 0; };", "todayStr()")
-        self.assertRegex(out, r"^\d{4}-\d{2}-\d{2}$")
+        """`new Date()` does not route through `Date.now` in V8, so stubbing
+        the clock proves nothing here — compare against the real device date."""
+        import datetime
+
+        out = self.run_js("", "todayStr()")
+        self.assertEqual(out, datetime.date.today().strftime("%Y-%m-%d"))
 
 
 class HandlersRunOffTheEventLoopTests(unittest.TestCase):
-    """docs/BACKLOG.md §4 — every API handler is synchronous and hits the
+    """Backlog (closed in v0.9.0) — every API handler is synchronous and hits the
     database; awaiting them inline blocked the loop for the whole round trip
     to Neon, so one slow query stalled every other request in the process."""
 
@@ -462,7 +511,7 @@ class HandlersRunOffTheEventLoopTests(unittest.TestCase):
 
 
 class ConstraintHardeningTests(unittest.TestCase):
-    """docs/BACKLOG.md §4 — the seq uniqueness constraint must apply, but must
+    """Backlog (closed in v0.9.0) — the seq uniqueness constraint must apply, but must
     never be able to stop a live portal from starting."""
 
     def test_constraint_applies_on_a_fresh_database(self):

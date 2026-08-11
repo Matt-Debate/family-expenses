@@ -192,13 +192,17 @@ def build_mcp(store: Store) -> FastMCP:
                 expenses = [e for e in expenses if e.date <= until]
         else:
             expenses = store.list(status=status, since=since, until=until)
+        # one clock read for both figures: computed separately, a call
+        # straddling midnight buckets summary and ledger_total against
+        # different days and they stop being comparable
+        today = today_str()
         return {
             "expenses": [e.to_dict() for e in expenses],
             # totals for THESE rows — a filtered list beside a whole-ledger
             # total is a wrong answer to the question that was asked
-            "summary": store.summarize(expenses),
-            "ledger_total": store.summary() if (query or since or until
-                                                or status not in ("all", None, ""))
+            "summary": store.summarize(expenses, today=today),
+            "ledger_total": store.summary(today=today) if (query or since or until
+                                                           or status not in ("all", None, ""))
             else None,
         }
 

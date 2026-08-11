@@ -21,9 +21,14 @@ against the old code, by design: the `APP_TZ` item was filed as a missing test,
 and the constraint-hardening item is new behavior. Said plainly because the first
 draft of this entry claimed all eight were failing-first, which was not true.
 
-Reviewed before release by three independent passes (two adversarial agents and
-a cross-model Codex review). All three found the same regression in the first
-draft — a portal that cached the server's date forever — which is fixed below.
+Reviewed before release by four independent passes. Three (two adversarial agents
+and a cross-model Codex review) found the same regression in the first draft — a
+portal that cached the server's date forever. A fourth then reviewed the fix for
+that and found it guarded a backward clock jump but not a forward one. Both are
+fixed below; the honest reading is that the review caught what the tests did not,
+twice, and both times on the same code path — the date that gets written into the
+ledger. Two things still lack a behavioral test and are named where they occur:
+the portal's history rendering, and the `init()` warning path.
 
 ### Fixed
 - **A search for a literal `%` returned the entire ledger.** `store.find` built
@@ -51,12 +56,18 @@ draft — a portal that cached the server's date forever — which is fixed belo
   open, using **elapsed** time rather than the device's absolute clock — the
   first draft pinned it forever, so a tab left open overnight would have gone on
   offering yesterday as the payment date, and an accepted default writes a wrong
-  date into the ledger. Returning to a backgrounded tab also re-syncs.
-  `PortalDateArithmeticTests` runs the page's own date functions under node
-  rather than grepping for them, which is what caught this.
+  date into the ledger. The estimate is **capped at one day**, after which the
+  page refetches instead: elapsed time is only sound while the device clock runs
+  at the right *rate*, and an NTP correction mid-session reads as time passing —
+  unbounded, that writes a payment date into a month that has not happened yet.
+  Bounded to ±1 day either way; returning to a backgrounded tab re-syncs.
+  `PortalDateArithmeticTests` executes the page's own date functions under node
+  instead of grepping for them, which is the only reason either direction of
+  this was caught.
 - **`/api/list` read the clock twice** — once for the summary, once for the
   `today` it returns — so a request straddling midnight could bucket rows
-  against one day and label them with the next.
+  against one day and label them with the next. `expenses_list` had the same
+  split between `summary` and `ledger_total`. Both now read it once.
 - **Every API handler blocked the event loop.** The handlers are synchronous and
   all of them hit the database, so one slow round trip to Neon stalled every
   other request in the process, `/health` included. They now run in a
