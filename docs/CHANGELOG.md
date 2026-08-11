@@ -14,6 +14,29 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: health + portal routes OK.
 
+## [0.7.1] — 2026-08-11
+
+### Fixed
+- **The MCP never knew the category keys existed.** Nothing in `_HELP` or any
+  tool description mentioned them, so asked to record borrowed money the agent
+  invented `"loan repayment"` — which saved fine, matched nothing, and silently
+  counted ¥31,100 as a paid household expense instead of a borrow. The playbook
+  now lists every key and calls out `borrow` as the one with arithmetic behind
+  it, explicitly warning against synonyms; `expenses_add` and `expenses_update`
+  point at it too. This is the failure `docs/MCP_DESIGN.md` exists to prevent:
+  guidance that lives nowhere the agent reads is not guidance.
+- Write results now carry a coaching note when a category will not group, so a
+  wrong guess self-corrects on the next call rather than mis-bucketing forever.
+  Values are still stored verbatim — the MCP can write anything.
+- `expenses_update` now returns a `note` at all. It was the only write tool
+  without one, contrary to the module's own stated contract.
+
+### Tests
+- Suite 105 → **110**. The category-note helper short-circuits on an empty
+  category, so a `NameError` in it stayed invisible to every existing test —
+  each of which added expenses without one. The new tests pass a real category,
+  which is what surfaced it.
+
 ## [0.7.0] — 2026-08-11
 
 ### Changed

@@ -30,7 +30,10 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .store import Store, ValidationError, _utc_now_iso, today_str
+from .store import (
+    BORROW_CATEGORY, CATEGORY_KEYS, Store, ValidationError, _utc_now_iso,
+    today_str,
+)
 
 _READ = ToolAnnotations(readOnlyHint=True)
 _WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
@@ -55,6 +58,20 @@ INTENT → TOOL:
 - "给我老婆做个链接" → expenses_mint_link(label="wife") — link never expires
 - "哪些链接还在用 / who has a link / list the links" → expenses_list_links
 
+CATEGORIES — pass one of these EXACT keys. Anything else still saves, but it
+will not group into the household's totals or charts, so avoid inventing one:
+  living · aden-edu · aden-sports · aden-clothes · aden-other · food · home ·
+  utilities · internet · mobile · transport · travel · entertainment ·
+  clothes · medical · borrow · other
+
+- "borrow" is the ONE category with arithmetic behind it: it means she paid out
+  of her own pocket (or the company's) and is owed the money BACK. It is kept
+  out of every household expense total and reported on its own. Use it for
+  "垫付/她先付的/borrowed from her/she fronted it/I lent". Do NOT invent a
+  synonym like "loan repayment" or "reimbursement" — those silently fall out of
+  the borrow figures.
+- "living" is the recurring monthly household payment (生活费).
+
 RULES OF THUMB:
 - Dates/paid dates: omit them — the server defaults to today in China time.
 - Amounts: pass what the user said — "¥300", "300块", "1,200元" all parse.
@@ -77,6 +94,19 @@ def build_mcp(store: Store) -> FastMCP:
     )
 
     # ── helpers ───────────────────────────────────────────────────────────
+    def _category_note(category) -> str:
+        """Warn when a category will not group. Silent mis-bucketing is the
+        failure mode here: the row saves, the totals look fine, and the money
+        quietly lands where nobody looks."""
+        text = (str(category).strip() if category else "")
+        if not text or text in CATEGORY_KEYS:
+            return ""
+        return (
+            f" · NOTE: category {text!r} is not one of the household's keys, so "
+            "it will not appear in the totals or charts — call expenses_help for "
+            f"the list, and use {BORROW_CATEGORY!r} for money that must be paid back"
+        )
+
     def _summary_note() -> str:
         s = store.summary()
         return f"unpaid total now ¥{s['unpaid']:.2f} across {s['unpaid_count']} item(s)"
@@ -169,7 +199,7 @@ def build_mcp(store: Store) -> FastMCP:
         today (China time). Keep the user's own words as description. If they
         say it's ALREADY paid ('昨天交了...'), pass paid=true (paid_date
         defaults to today). To change an EXISTING expense use expenses_update;
-        to pay one off use expenses_mark_paid."""
+        to pay one off use expenses_mark_paid. category: use an exact key from expenses_help — and for money someone fronted and is owed back, category='borrow' (never a synonym)."""
         expense = store.create(
             date=date or today_str(), amount=amount, description=description,
             category=category, submitted_by=submitted_by,
@@ -180,7 +210,7 @@ def build_mcp(store: Store) -> FastMCP:
                 changed_by=submitted_by,
             )
         result = expense.to_dict()
-        result["note"] = _summary_note()
+        result["note"] = _summary_note() + _category_note(category)
         return result
 
     @mcp.tool(annotations=_WRITE)
@@ -220,7 +250,7 @@ def build_mcp(store: Store) -> FastMCP:
         """Correct an existing expense. Use for: '改成350', 'actually it was
         350', '不是足球是篮球', wrong date. Target by query or expense_id;
         pass ONLY the fields that change. To mark paid/unpaid use
-        expenses_mark_paid (this tool cannot set paid)."""
+        expenses_mark_paid (this tool cannot set paid). category must be an exact key from expenses_help; 'borrow' means owed back to whoever paid."""
         eid, ambiguous = _resolve(expense_id, query, prefer_unpaid=True)
         if ambiguous:
             return ambiguous
@@ -237,7 +267,9 @@ def build_mcp(store: Store) -> FastMCP:
                 "nothing to change — pass amount, description, date or category; "
                 "for paid status use expenses_mark_paid"
             )
-        return store.update(eid, fields=fields, changed_by=changed_by).to_dict()
+        result = store.update(eid, fields=fields, changed_by=changed_by).to_dict()
+        result["note"] = _summary_note() + _category_note(fields.get("category"))
+        return result
 
     @mcp.tool(annotations=_DESTRUCTIVE)
     def expenses_delete(

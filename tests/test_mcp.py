@@ -252,6 +252,43 @@ class AgentErgonomicsTests(unittest.TestCase):
         self.assertIn("expenses_list_links", desc["expenses_revoke_link"])
         self.assertNotIn("CLI", desc["expenses_revoke_link"])
 
+    def test_help_lists_the_canonical_categories_and_flags_borrow(self):
+        """The agent invented 'loan repayment' because nothing ever told it the
+        keys existed. The list has to live where the agent actually reads."""
+        from app.store import BORROW_CATEGORY, CATEGORY_KEYS
+
+        text = self.call("expenses_help")
+        for key in CATEGORY_KEYS:
+            self.assertIn(key, text, f"category {key!r} missing from the playbook")
+        self.assertIn("垫付", text)
+        self.assertIn(BORROW_CATEGORY, text)
+
+    def test_write_tools_point_at_the_category_keys(self):
+        desc = {
+            t.name: " ".join((t.description or "").split())
+            for t in run(self.mcp.list_tools())
+        }
+        for tool in ("expenses_add", "expenses_update"):
+            self.assertIn("borrow", desc[tool], tool)
+            self.assertIn("expenses_help", desc[tool], tool)
+
+    def test_offbook_category_is_coached_in_the_result(self):
+        """Saves, but says so — silent mis-bucketing is the failure mode: the
+        row looks fine and the money lands where nobody looks."""
+        result = self.call("expenses_add", amount="100", category="loan repayment")
+        self.assertEqual(result["category"], "loan repayment")  # stored verbatim
+        self.assertIn("loan repayment", result["note"])
+        self.assertIn("borrow", result["note"])
+
+    def test_canonical_category_gets_no_warning(self):
+        result = self.call("expenses_add", amount="100", category="borrow")
+        self.assertNotIn("NOTE", result["note"])
+
+    def test_category_note_survives_on_update_too(self):
+        added = self.call("expenses_add", amount="100", description="office")
+        out = self.call("expenses_update", expense_id=added["id"], category="reimbursement")
+        self.assertIn("reimbursement", out["note"])
+
     def test_annotations_read_vs_destructive(self):
         tools = {t.name: t for t in run(self.mcp.list_tools())}
         self.assertTrue(tools["expenses_list"].annotations.readOnlyHint)
