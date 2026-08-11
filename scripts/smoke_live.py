@@ -32,6 +32,15 @@ from app.store import Store  # noqa: E402
 
 FAILED = False
 
+# One list, used by both the assertion and the line the operator reads — the
+# label said "10 tools" for a release in which the assertion checked 13.
+EXPECTED_MCP_TOOLS = {
+    "expenses_help", "expenses_list", "expenses_add", "expenses_mark_paid",
+    "expenses_update", "expenses_delete", "expenses_history",
+    "expenses_mint_link", "expenses_revoke_link", "expenses_list_links",
+    "classes_list", "classes_add", "classes_log",
+}
+
 
 def is_neon_pooled_url(url: str) -> bool:
     """Return whether a Postgres URL names Neon's pooled endpoint."""
@@ -157,14 +166,7 @@ async def exercise_public_mcp(base: str) -> None:
             await session.initialize()
             tools = await session.list_tools()
             prompts = await session.list_prompts()
-            expected_tools = {
-                "expenses_help", "expenses_list", "expenses_add",
-                "expenses_mark_paid", "expenses_update", "expenses_delete",
-                "expenses_history", "expenses_mint_link", "expenses_revoke_link",
-                "expenses_list_links",
-                "classes_list", "classes_add", "classes_log",
-            }
-            assert {tool.name for tool in tools.tools} == expected_tools
+            assert {tool.name for tool in tools.tools} == EXPECTED_MCP_TOOLS
             assert {prompt.name for prompt in prompts.prompts} == {
                 "jizhang", "duizhang", "xiufu",
             }
@@ -281,7 +283,8 @@ def main() -> int:
         print("4. Public MCP client + bilingual conversational flow")
         try:
             asyncio.run(exercise_public_mcp(base))
-            check("initialize, 10 tools, 3 prompts, bilingual writes/reads/cleanup", True)
+            check("initialize, %d tools, 3 prompts, bilingual writes/reads/cleanup"
+            % len(EXPECTED_MCP_TOOLS), True)
         except Exception as exc:
             check("public MCP gate", False, f"{type(exc).__name__}: {exc}")
     finally:
