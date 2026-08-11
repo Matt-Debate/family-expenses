@@ -130,9 +130,12 @@ JavaScript rather than reading it.
   under her thumb before the picker could open.
 
 ### Tests
-250 → 289, and two review rounds closed three long-standing coverage gaps:
-`addClsForm`'s submit handler is executed at last (BACKLOG §4 — all four
-mutations it named as surviving are now caught), the two STR language tables
+250 → 293, and two review rounds closed three long-standing coverage gaps:
+**BACKLOG §4 is closed** — both form-submit handlers now run under node, the
+class one (`addClsForm`) and the expense one (`addForm`, live since v0.1 and the
+one that writes money directly). All four mutations §4 named as surviving are
+caught, as are four on the expense side, including `parseFloat`→`parseInt` on
+the amount and a cleared due date sent blank. The two STR language tables
 have a top-level key-parity guard (deleting an English key left the whole suite
 green, and the dialog then reads the literal key), and the whole-course delete
 confirm is driven by a test rather than only its endpoint.

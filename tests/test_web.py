@@ -1461,18 +1461,23 @@ class ClassAddFormTests(unittest.TestCase):
     """
 
     PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+    HANDLER = ('  $("addClsForm").addEventListener("submit"',
+               '  $("classesBody").addEventListener("click"')
+    ENDPOINT = "classes-add"
 
     def submit(self, fields: dict) -> dict:
         import json
 
         src = self.PORTAL.read_text(encoding="utf-8")
-        block = src[src.index('  $("addClsForm").addEventListener("submit"'):
-                    src.index('  $("classesBody").addEventListener("click"')]
-        self.assertIn("classes-add", block, "block markers moved")
+        start, end = self.HANDLER
+        block = src[src.index(start):src.index(end)]
+        self.assertIn(self.ENDPOINT, block, "block markers moved")
         script = f"""
 var nodes = {json.dumps(fields)}, sent = null, toasts = [], handlerFn = null;
 for (var k in nodes) nodes[k] = {{value: nodes[k]}};
-nodes.addClsWrap = {{open: true}};
+nodes.addClsWrap = {{open: true}}; nodes.addWrap = {{open: true}};
+function refresh() {{}}
+function todayStr() {{ return "2026-08-11"; }}
 function $(id) {{ if (!nodes[id]) nodes[id] = {{value: ""}};
   nodes[id].addEventListener = function (_e, fn) {{ handlerFn = fn; }};
   return nodes[id]; }}
@@ -1520,6 +1525,53 @@ console.log(JSON.stringify({{sent: sent, toasts: toasts}}));
         result = self.submit(dict(self.A_PACK, clsExpense=""))
         self.assertIsNone(result["sent"], "it posted an empty expense_id")
         self.assertEqual(result["toasts"], ["cls_no_payment"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
+class ExpenseAddFormTests(ClassAddFormTests):
+    """The other half of BACKLOG §4: the expense form, live since v0.1 and the
+    one that writes money directly, was executed by no test at all.
+
+    Same harness, different slice — it is the older and more-used of the two
+    submit handlers, and every field it sends lands in a total.
+    """
+
+    HANDLER = ('  $("addForm").addEventListener("submit"',
+               "  // ---- per-item actions ----")
+    ENDPOINT = "submit"
+
+    A_ROW = {"date": "2026-08-20", "amount": "2200", "category": "aden-sports",
+             "desc": "  足球课 8月  "}
+
+    def test_the_form_sends_exactly_what_she_typed(self):
+        sent = self.submit(dict(self.A_ROW))["sent"]
+        self.assertEqual(sent["name"], "submit")
+        self.assertEqual(sent["body"], {
+            "date": "2026-08-20", "amount": 2200.0,
+            "category": "aden-sports", "description": "足球课 8月",
+        })
+
+    def test_an_empty_date_falls_back_to_the_household_today(self):
+        """`date` is the DUE date and the field is prefilled, but she can clear
+        it. Sending "" is a 400; sending the browser's idea of today is a day
+        out in China for most of the working day."""
+        sent = self.submit(dict(self.A_ROW, date=""))["sent"]
+        self.assertEqual(sent["body"]["date"], "2026-08-11")
+
+    def test_an_empty_description_is_null_not_a_blank_string(self):
+        sent = self.submit(dict(self.A_ROW, desc="   "))["sent"]
+        self.assertIsNone(sent["body"]["description"])
+
+    def test_the_amount_is_sent_as_the_number_she_typed(self):
+        """It is the money. A parseInt here silently drops the fen off every
+        amount with one."""
+        sent = self.submit(dict(self.A_ROW, amount="220.55"))["sent"]
+        self.assertEqual(sent["body"]["amount"], 220.55)
+
+    # not applicable — this form has no payment selector
+    test_the_period_label_reaches_the_server_when_the_kind_uses_one = None
+    test_the_class_count_is_sent_as_the_number_she_typed = None
+    test_no_payment_selected_sends_nothing = None
 
 
 class ClassKindParityTests(unittest.TestCase):
