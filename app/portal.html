@@ -136,6 +136,9 @@
   .st.lend { color:var(--lend); }
   .item.paid .ex-desc, .item.paid .ex-amt { color:var(--muted); font-weight:450; }
   .btns { display:flex; gap:8px; padding:2px 0 12px; }
+  /* an author `display` beats the UA sheet's [hidden]{display:none}, so a
+     hidden .btns stayed on screen — every class row showed its Delete */
+  .btns[hidden], .histbox[hidden] { display:none; }
   .btns button { padding:9px 4px; font-size:.8rem; cursor:pointer;
     border:1px solid var(--rule); border-radius:var(--radius); background:transparent; }
   .btns .pay { color:var(--ok); border-color:var(--ok); font-weight:600; }
@@ -531,7 +534,10 @@
     var hd = ev.target.closest && ev.target.closest(".ex-hd");
     if (!hd) return;
     var item = hd.closest(".item");
-    if (item) toggleItem(item.getAttribute("data-id"));
+    // Class rows reuse .ex-hd but carry data-pkg, not data-id. Without this
+    // guard toggleItem(null) ran and re-rendered the class tab, closing the
+    // row the class handler had just opened — the whole tab looked inert.
+    if (item && item.getAttribute("data-id")) toggleItem(item.getAttribute("data-id"));
   });
   document.addEventListener("keydown", function (ev) {
     if (ev.key !== "Enter" && ev.key !== " ") return;
@@ -539,7 +545,10 @@
     if (!hd) return;
     ev.preventDefault();
     var item = hd.closest(".item");
-    if (item) toggleItem(item.getAttribute("data-id"));
+    // Class rows reuse .ex-hd but carry data-pkg, not data-id. Without this
+    // guard toggleItem(null) ran and re-rendered the class tab, closing the
+    // row the class handler had just opened — the whole tab looked inert.
+    if (item && item.getAttribute("data-id")) toggleItem(item.getAttribute("data-id"));
   });
 
   // ---- summary cards ----
@@ -917,20 +926,20 @@
     if (p.kind === "per_class") {
       return {
         big: s.remaining + "/" + s.class_count,
-        sub: t("cls_rate") + " " + money0(s.rate) + " · " +
+        sub: t("cls_rate") + " " + money(s.rate) + " · " +
              t("cls_used") + " " + s.used +
              (s.overrun ? " · " + t("cls_over") + " " + s.overrun : ""),
-        amt: t("cls_left") + " " + money0(s.remaining_amount),
+        amt: t("cls_left") + " " + money(s.remaining_amount),
         cls: s.remaining > 0 ? "soon" : "paid",
       };
     }
     return {
       big: String(s.owed),
-      sub: t("cls_rate") + " " + money0(s.rate) + " · " +
-           t("cls_reclaim") + " " + money0(s.reclaimable_amount) +
+      sub: t("cls_rate") + " " + money(s.rate) + " · " +
+           t("cls_reclaim") + " " + money(s.reclaimable_amount) +
            " (" + s.reclaimable + ") · " +
-           t("cls_forfeit") + " " + money0(s.forfeited_amount) + " (" + s.forfeited + ")",
-      amt: t("cls_owed") + " " + money0(s.owed_amount),
+           t("cls_forfeit") + " " + money(s.forfeited_amount) + " (" + s.forfeited + ")",
+      amt: t("cls_owed") + " " + money(s.owed_amount),
       cls: s.owed > 0 ? "lend" : "paid",
     };
   }
@@ -1123,8 +1132,14 @@
   });
 
   // ---- class tracker: fetch + actions ----
+  // Every fetch carries a generation number. Tapping the tab (or logging a
+  // class) can leave two requests in flight, and without this the slower —
+  // older — response lands last and repaints stale totals over fresh ones.
+  var clsGen = 0;
   function refreshClasses() {
+    var gen = ++clsGen;
     return api("classes-list", {}).then(function (j) {
+      if (gen !== clsGen) return;  // a newer request already answered
       packages = j.packages || [];
       candidates = j.candidates || [];
       if (j.today) { serverToday = j.today; serverTodayAt = Date.now(); }
@@ -1184,9 +1199,14 @@
     // logging a class asks for the date, defaulting to the household's today
     var d = prompt(t("due"), todayStr());
     if (!d) return;
+    // a double tap would log the class twice, and on a period package each
+    // extra one claims another class back from the school
+    if (b.disabled) return;
+    b.disabled = true;
     api("classes-log", {package_id:id, kind:act, date:d.trim()})
       .then(function () { toast(t("cls_logged")); refreshClasses(); })
-      .catch(function (e) { toast(e.message); });
+      .catch(function (e) { toast(e.message); })
+      .then(function () { b.disabled = false; });
   });
 
   // ---- init ----

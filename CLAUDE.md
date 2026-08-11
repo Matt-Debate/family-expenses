@@ -56,7 +56,7 @@ implementation; a filtered list must be summarised from its own rows, never from
 the whole table. Portal writes are attributed server-side from the link label; a
 client-supplied author is ignored.
 A **class package** stores no money: its rate is `expense.amount / class_count`,
-derived at read time. `Store.summarize_package(rows)` is the ONE implementation
+derived at read time. `Store.summarize_package(package, amount, events)` is the ONE implementation
 of that arithmetic, amounts are exact ratios (never a rounded rate × n), and
 logging a class moves no expense total — consumption is not spending.
 
@@ -90,7 +90,7 @@ transcript, a commit, or a doc. Pipe secrets straight into env vars
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 187 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 210 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 PORTAL_DEV_RELOAD=1 python3 -m app.main   # …and re-read portal.html per request
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link

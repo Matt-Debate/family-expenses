@@ -46,6 +46,25 @@ class NotFoundError(KeyError):
         return self.args[0]
 
 
+class PackageNotFoundError(NotFoundError):
+    """No class package with that id.
+
+    Separate from NotFoundError because the inherited message points at
+    ``expenses_list``, which cannot produce a package id — a cross-reference
+    that names something unable to help is what P3 forbids.
+    """
+
+    def __init__(self, package_id: Any):
+        KeyError.__init__(
+            self,
+            f"no class package with id {package_id!r} — ids come from "
+            "classes_list; or target it by query=<a word from the course name> "
+            "instead"
+        )
+        self.expense_id = None
+        self.package_id = package_id
+
+
 _ALLOWED_UPDATE_FIELDS = frozenset(
     {"date", "amount", "currency", "category", "description", "submitted_by"}
 )
@@ -102,6 +121,18 @@ _MISSED_EVENT_KINDS = ("missed_school", "missed_us")
 # category, which would silently drop uncategorised rows from every total.
 _NOT_BORROW = "COALESCE(category, '') <> 'borrow'"
 _IS_BORROW = "COALESCE(category, '') = 'borrow'"
+
+
+def _is_integrity_error(exc: BaseException) -> bool:
+    """A UNIQUE/CHECK/FK violation, on either driver.
+
+    Matched by class name rather than by importing psycopg, because the test
+    suite must run with no Postgres driver installed at all (P8).
+    """
+    names = {type(exc).__name__ for exc in (exc,)} | {
+        base.__name__ for base in type(exc).__mro__
+    }
+    return bool(names & {"IntegrityError", "UniqueViolation", "ForeignKeyViolation"})
 
 
 def _utc_now_iso() -> str:
@@ -370,8 +401,9 @@ class Store:
             if package is not None:
                 raise ValidationError(
                     f"this payment is tracked by the class package "
-                    f"{package['name']!r} — delete that package first (it holds "
-                    "the attendance log), then delete the payment"
+                    f"{package['name']!r}, which holds its attendance log. "
+                    "Remove that course first — from the Classes tab in the "
+                    "portal — and then delete the payment."
                 )
             # history row survives the delete (pre-change snapshot)
             self._write_history(
@@ -534,6 +566,12 @@ class Store:
     # ── class tracker ─────────────────────────────────────────────────────
     @staticmethod
     def _validate_class_count(value: Any) -> int:
+        # bool is an int subclass and 1.9 truncates to 1 — both would silently
+        # become a class count nobody typed, and the count divides the money
+        if isinstance(value, bool) or isinstance(value, float) and value != int(value):
+            raise ValidationError(
+                f"class_count {value!r} must be a whole number of classes, e.g. 10"
+            )
         try:
             count = int(value)
         except (TypeError, ValueError):
@@ -601,25 +639,43 @@ class Store:
             "logged": tally["attended"] + missed,
         }
         if package["kind"] == "per_class":
-            used = tally["attended"]
-            remaining = max(0, count - used)
+            attended = tally["attended"]
+            # Money is capped at what was paid and the leftover is DERIVED by
+            # subtraction, never rounded independently: two independent
+            # round()s on a payment that does not divide evenly invent or lose
+            # a cent, and these two numbers sit side by side on the page.
+            used_amount = value(min(attended, count))
             out.update({
-                "used": used,
-                "used_amount": value(min(used, count)),
-                "remaining": remaining,
-                "remaining_amount": value(remaining),
+                "used": attended,
+                "used_amount": used_amount,
+                "remaining": max(0, count - attended),
+                "remaining_amount": round(amount - used_amount, 2),
                 # attending more classes than were bought is a real thing that
                 # happens; report it rather than clamping it out of sight
-                "overrun": max(0, used - count),
+                "overrun": max(0, attended - count),
             })
         else:
+            # Only classes the payment actually covers carry money. Logging
+            # more misses than were paid for (a wrong class_count, or a bad
+            # month) must not claim back more than was handed over — "they owe
+            # us more than we paid them" is a wrong total in the most visible
+            # place, and the count still records what really happened.
+            school = min(tally["missed_school"], count)
+            # the school's share is counted first: if the log overruns, the
+            # excess lands on what we forfeited rather than inflating the
+            # figure we would put in front of the school
+            ours = min(tally["missed_us"], count - school)
+            reclaimable_amount = value(school)
+            forfeited_amount = value(ours)
             out.update({
                 "owed": missed,
-                "owed_amount": value(missed),
+                # derived from its own parts, so the split always reconciles
+                "owed_amount": round(reclaimable_amount + forfeited_amount, 2),
                 "reclaimable": tally["missed_school"],
-                "reclaimable_amount": value(tally["missed_school"]),
+                "reclaimable_amount": reclaimable_amount,
                 "forfeited": tally["missed_us"],
-                "forfeited_amount": value(tally["missed_us"]),
+                "forfeited_amount": forfeited_amount,
+                "overrun": max(0, missed - count),
             })
         return out
 
@@ -654,29 +710,40 @@ class Store:
             expense = self._fetch(tx, str(expense_id))
             if expense is None:
                 raise NotFoundError(expense_id)
-            existing = tx.query_one(
-                "SELECT id, name FROM class_packages WHERE expense_id = :eid",
-                {"eid": str(expense_id)},
-            )
+            existing = self._duplicate_package(tx, str(expense_id))
             if existing is not None:
                 raise ValidationError(
                     f"that payment is already tracked by the class package "
                     f"{existing['name']!r} — one payment, one package, or the "
                     "same money would be counted twice"
                 )
-            tx.execute(
-                "INSERT INTO class_packages (id, expense_id, name, kind, "
-                "class_count, period_label, archived, created_at, updated_at) "
-                "VALUES (:id, :expense_id, :name, :kind, :class_count, "
-                ":period_label, :archived, :created_at, :updated_at)",
-                {
-                    "id": package_id, "expense_id": str(expense_id), "name": name,
-                    "kind": kind, "class_count": class_count,
-                    "period_label": (str(period_label).strip() or None)
-                    if period_label else None,
-                    "archived": False, "created_at": now, "updated_at": now,
-                },
-            )
+            try:
+                tx.execute(
+                    "INSERT INTO class_packages (id, expense_id, name, kind, "
+                    "class_count, period_label, archived, created_at, updated_at) "
+                    "VALUES (:id, :expense_id, :name, :kind, :class_count, "
+                    ":period_label, :archived, :created_at, :updated_at)",
+                    {
+                        "id": package_id, "expense_id": str(expense_id), "name": name,
+                        "kind": kind, "class_count": class_count,
+                        "period_label": (str(period_label).strip() or None)
+                        if period_label else None,
+                        "archived": False, "created_at": now, "updated_at": now,
+                    },
+                )
+            except Exception as exc:
+                # The check above is not atomic with this insert, and since
+                # v0.9.0 the API handlers run in a threadpool — so two taps on
+                # "Add a course" can both pass it and the UNIQUE index becomes
+                # the thing that fires. The constraint doing its job must not
+                # reach the caller as a 500 with a driver traceback.
+                if not _is_integrity_error(exc):
+                    raise
+                raise ValidationError(
+                    "that payment is already tracked by a class package — one "
+                    "payment, one package, or the same money would be counted "
+                    "twice. Call classes_list to see it."
+                ) from exc
         return self.package(package_id)
 
     def package(self, package_id: str) -> dict[str, Any]:
@@ -685,7 +752,7 @@ class Store:
                 f"{self._PACKAGE_SELECT} WHERE p.id = :id", {"id": str(package_id)}
             )
             if row is None:
-                raise NotFoundError(package_id)
+                raise PackageNotFoundError(package_id)
             events = tx.query(
                 "SELECT id, package_id, date, kind, note, logged_by, created_at "
                 "FROM class_events WHERE package_id = :id ORDER BY date DESC, created_at DESC",
@@ -734,6 +801,30 @@ class Store:
             self._package_payload(row, by_package.get(row["id"], [])) for row in rows
         ]
 
+    @staticmethod
+    def _duplicate_package(tx, expense_id: str) -> Optional[dict[str, Any]]:
+        """The friendly half of the one-package-per-payment rule.
+
+        Its own method so a test can blind it and prove the UNIQUE index — the
+        half that actually holds under concurrency — still reports a reason.
+        """
+        return tx.query_one(
+            "SELECT id, name FROM class_packages WHERE expense_id = :eid",
+            {"eid": expense_id},
+        )
+
+    def linked_expense_ids(self) -> set[str]:
+        """Every expense already funding a package — ids only.
+
+        Archived packages count: their payment is still spoken for, and
+        offering it again would only produce a UNIQUE violation.
+        """
+        with self.db.tx() as tx:
+            return {
+                r["expense_id"]
+                for r in tx.query("SELECT expense_id FROM class_packages")
+            }
+
     def update_package(
         self, package_id: str, *, fields: dict[str, Any]
     ) -> dict[str, Any]:
@@ -765,12 +856,33 @@ class Store:
         clean["updated_at"] = _utc_now_iso()
         set_clause = ", ".join(f"{k} = :{k}" for k in clean)  # keys checked above
         with self.db.tx() as tx:
+            if "kind" in clean:
+                current = tx.query_one(
+                    "SELECT kind FROM class_packages WHERE id = :id",
+                    {"id": str(package_id)},
+                )
+                logged = tx.query_one(
+                    "SELECT COUNT(*) AS n FROM class_events WHERE package_id = :id",
+                    {"id": str(package_id)},
+                )
+                if (current and current["kind"] != clean["kind"]
+                        and logged and logged["n"]):
+                    # Flipping the kind silently reinterprets every class
+                    # already logged: attendances stop drawing anything down
+                    # and misses turn into money owed, or the reverse. The log
+                    # is the record; it does not get retconned.
+                    raise ValidationError(
+                        f"this course already has {logged['n']} class(es) logged, "
+                        "so its type cannot be changed — the log would mean "
+                        "something different. Delete it and add it again if the "
+                        "type was wrong."
+                    )
             cur = tx.execute(
                 f"UPDATE class_packages SET {set_clause} WHERE id = :package_id",
                 dict(clean, package_id=str(package_id)),
             )
             if cur.rowcount == 0:
-                raise NotFoundError(package_id)
+                raise PackageNotFoundError(package_id)
         return self.package(package_id)
 
     def delete_package(self, package_id: str) -> bool:
@@ -798,7 +910,7 @@ class Store:
                 "SELECT id FROM class_packages WHERE id = :id", {"id": str(package_id)}
             )
             if exists is None:
-                raise NotFoundError(package_id)
+                raise PackageNotFoundError(package_id)
             tx.execute(
                 "INSERT INTO class_events (id, package_id, date, kind, note, "
                 "logged_by, created_at) VALUES (:id, :package_id, :date, :kind, "

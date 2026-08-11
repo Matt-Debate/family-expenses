@@ -641,7 +641,98 @@ class ClassTrackerApiTests(unittest.TestCase):
                   kind="per_class", class_count=10)
         r = self.post("delete", id=eid)
         self.assertEqual(r.status_code, 400)
-        self.assertIn("delete that package first", r.json()["error"])
+        self.assertIn("Remove that course first", r.json()["error"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
+class ClassLineRenderingTests(unittest.TestCase):
+    """Runs the portal's own `clsLine` instead of grepping for it.
+
+    Mutation testing found six ways to corrupt this tab's money display that
+    the whole suite let through — showing `owed_amount` where the reclaimable
+    half belongs, rendering a period package through the per_class branch,
+    dropping the cents. Every one lived in code no test executed.
+    """
+
+    PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+
+    def cls_line(self, package: dict) -> dict:
+        import json
+
+        src = self.PORTAL.read_text(encoding="utf-8")
+        start = src.index("  function clsLine(p) {")
+        end = src.index("  function renderClasses() {")
+        block = src[start:end]
+        self.assertIn("function clsLine", block, "block markers moved")
+        script = (
+            # stubs: the labels are i18n keys, the money format is the portal's
+            'function t(k) { return k; }\n'
+            'function money(n) { return "¥" + Number(n).toFixed(2); }\n'
+            + block
+            + f"\nconsole.log(JSON.stringify(clsLine({json.dumps(package)})));\n"
+        )
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_a_per_class_pack_shows_what_is_left(self):
+        line = self.cls_line({"kind": "per_class", "summary": {
+            "remaining": 7, "class_count": 10, "rate": 220.0, "used": 3,
+            "overrun": 0, "remaining_amount": 1540.0,
+        }})
+        self.assertEqual(line["big"], "7/10")
+        self.assertIn("¥1540.00", line["amt"])   # cents, not ¥1540 rounded
+        self.assertIn("¥220.00", line["sub"])
+
+    def test_a_period_package_shows_what_is_owed_and_the_split(self):
+        line = self.cls_line({"kind": "period", "summary": {
+            "owed": 3, "owed_amount": 750.0, "rate": 250.0,
+            "reclaimable": 2, "reclaimable_amount": 500.0,
+            "forfeited": 1, "forfeited_amount": 250.0,
+        }})
+        self.assertEqual(line["big"], "3")
+        self.assertIn("¥750.00", line["amt"])
+        # the two halves must be their own figures — swapping in owed_amount
+        # here was a silent money corruption no test noticed
+        self.assertIn("¥500.00", line["sub"])
+        self.assertIn("¥250.00", line["sub"])
+        self.assertNotIn("¥750.00", line["sub"])
+        self.assertNotIn("undefined", line["sub"] + line["amt"] + line["big"])
+
+    def test_the_two_kinds_do_not_render_through_each_other(self):
+        """Inverting the branch made a period package print 'undefined/8'."""
+        for package in (
+            {"kind": "period", "summary": {
+                "owed": 0, "owed_amount": 0.0, "rate": 250.0,
+                "reclaimable": 0, "reclaimable_amount": 0.0,
+                "forfeited": 0, "forfeited_amount": 0.0}},
+            {"kind": "per_class", "summary": {
+                "remaining": 0, "class_count": 4, "rate": 100.0, "used": 4,
+                "overrun": 0, "remaining_amount": 0.0}},
+        ):
+            with self.subTest(kind=package["kind"]):
+                line = self.cls_line(package)
+                self.assertNotIn("undefined", "".join(line.values()))
+                self.assertNotIn("NaN", "".join(line.values()))
+
+    def test_cents_are_never_rounded_away(self):
+        """The server says ¥666.67; whole-yuan rounding showed ¥667 on the tab
+        whose job is telling a school what it owes."""
+        line = self.cls_line({"kind": "period", "summary": {
+            "owed": 2, "owed_amount": 666.67, "rate": 333.33,
+            "reclaimable": 1, "reclaimable_amount": 333.33,
+            "forfeited": 1, "forfeited_amount": 333.34,
+        }})
+        self.assertIn("¥666.67", line["amt"])
+        self.assertIn("¥333.33", line["sub"])
+
+    def test_an_overrun_is_surfaced_not_swallowed(self):
+        line = self.cls_line({"kind": "per_class", "summary": {
+            "remaining": 0, "class_count": 2, "rate": 100.0, "used": 3,
+            "overrun": 1, "remaining_amount": 0.0,
+        }})
+        self.assertIn("cls_over", line["sub"])
 
 
 class ClassKindParityTests(unittest.TestCase):
@@ -670,8 +761,70 @@ class ClassKindParityTests(unittest.TestCase):
         for kind in CLASS_EVENT_KINDS:
             self.assertIn(f'data-c="{kind}"', self.portal,
                           f"portal has no button that logs {kind!r}")
-            self.assertIn(f"{kind}:", self.portal,
-                          f"portal has no label for event kind {kind!r}")
+
+    def test_both_languages_label_every_event_kind(self):
+        """A bare `"{kind}:" in portal` check was satisfied by the Chinese
+        table alone — deleting only the English label went unnoticed, as did
+        replacing the whole map with a comment that happened to name the keys."""
+        from app.store import CLASS_EVENT_KINDS
+
+        blocks = re.findall(r"\bev:\s*\{(.*?)\}", self.portal, re.S)
+        self.assertEqual(len(blocks), 2, "expected one ev: map per language")
+        for lang, block in zip(("zh", "en"), blocks):
+            for kind in CLASS_EVENT_KINDS:
+                with self.subTest(lang=lang, kind=kind):
+                    self.assertRegex(
+                        block, rf"{kind}\s*:\s*[\"']",
+                        f"{lang} has no label for event kind {kind!r}",
+                    )
+
+    def test_the_draw_down_button_belongs_to_per_class_packs_only(self):
+        """Inverting this conditional took the '✓ Attended' button away from
+        the packs that need it and gave it to period fees, where attending
+        means nothing. The strings all still existed, so a grep passed."""
+        block = self.portal[
+            self.portal.index("  function renderClasses() {"):
+            self.portal.index("  function clsEvents(p) {")
+        ]
+        self.assertRegex(
+            block,
+            r'p\.kind === "per_class"\s*\?\s*\'<button class="pay" data-c="attended"',
+            "the attended button is no longer gated on a per_class package",
+        )
+
+    def test_the_expense_row_handler_ignores_class_rows(self):
+        """Class rows reuse `.ex-hd`. A document-level handler bound to it ran
+        `toggleItem(null)` and re-rendered, closing the row the class handler
+        had just opened — tapping a course did nothing at all."""
+        for match in re.finditer(r"toggleItem\(item\.getAttribute\(\"data-id\"\)\)",
+                                 self.portal):
+            line_start = self.portal.rfind("\n", 0, match.start())
+            line = self.portal[line_start:match.end()]
+            self.assertIn(
+                'item.getAttribute("data-id")', line.split("toggleItem")[0],
+                "toggleItem is called without first checking the row is an "
+                "expense; class rows carry data-pkg and would pass null",
+            )
+
+    def test_hidden_row_controls_are_actually_hidden(self):
+        """`.btns { display:flex }` is an author rule and out-ranks the UA
+        sheet's `[hidden] { display:none }`, so every course row showed its
+        action buttons — Delete included — whether open or not."""
+        self.assertRegex(
+            self.portal,
+            r"\.btns\[hidden\][^{]*\{[^}]*display\s*:\s*none",
+            "a hidden .btns will still render; add an explicit display:none",
+        )
+
+    def test_a_course_row_renders_its_class_log(self):
+        """Dropping clsEvents(p) from the row removed the log and the only
+        control that can take a mis-logged class back."""
+        block = self.portal[
+            self.portal.index("  function renderClasses() {"):
+            self.portal.index("  function clsEvents(p) {")
+        ]
+        self.assertIn("clsEvents(p)", block)
+        self.assertIn("data-unlog=", self.portal)
 
     def test_every_class_value_reaching_innerhtml_is_escaped(self):
         """P6/XSS: a course name is free text and the rows are built with

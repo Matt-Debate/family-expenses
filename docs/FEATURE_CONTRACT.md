@@ -86,9 +86,15 @@ attendance log silently.
 cancelled, so it is reclaimable) or `missed_us` (we skipped, so it is
 forfeited). Both missed kinds count toward what is owed; the cause is reported
 separately because only one of them is worth arguing about.
-`Store.summarize_package` is the ONE implementation of this arithmetic, and
-amounts come from the exact ratio `amount * n / count` rather than a rounded
-per-class rate, so the parts still sum to the payment.
+`Store.summarize_package` is the ONE implementation of this arithmetic.
+Amounts come from the exact ratio `amount * n / count`, never a rounded
+per-class rate, and **the figures that sit side by side are derived from each
+other rather than rounded independently**: `remaining_amount` is
+`amount - used_amount`, and `owed_amount` is `reclaimable + forfeited`. Three
+independent `round()` calls do not reconcile — ¥1,000 over 3 classes gave an
+owed total a cent adrift from its own halves. Money is also capped at the
+payment: over-logging is reported as an `overrun` count, never as owing back
+more than was handed over. `rate` is a display figure only.
 
 ### `access_tokens`
 `id` PK, `token` TEXT UNIQUE (`secrets.token_hex(32)`), `label`,
@@ -175,6 +181,8 @@ correcting call; write results carry the running unpaid total.
 
 One mobile-first page, bilingual **中文 (default) / English**, four tabs:
 
+The nav order is Due · Classes · History · Stats.
+
 - **Due** — summary cards (due now · paid this month · upcoming within 30 days ·
   owed back to her), collapsible add form, what is due in the next 30 days, then
   what was paid this month.
@@ -184,7 +192,9 @@ One mobile-first page, bilingual **中文 (default) / English**, four tabs:
 - **Classes** — prepaid courses. A per-class pack shows classes and money
   remaining; a monthly/semester fee shows what is owed back, split into
   reclaimable and forfeited. Tap a course for its class log. Its payload is
-  fetched when the tab is first opened, not on every page load.
+  fetched when the tab is opened rather than on page load, and each fetch
+  carries a generation number so a slow earlier response cannot repaint stale
+  totals over fresh ones.
 - **Stats** — figures and hand-rolled inline SVG charts (no chart library: no
   build step and no CDN is what makes this load behind the GFW).
 

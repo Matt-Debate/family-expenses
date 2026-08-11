@@ -75,7 +75,40 @@ none of them touch the `/mcp` mount path, its no-auth posture, or any tool
 signature, so §5.1 is not engaged. Worth doing next time the MCP surface is open
 for other reasons rather than on its own.
 
-## 3. Neon's restore window has never been recorded or rehearsed
+## 3. The class tracker has no audit trail, and no way to retire a course
+
+**Filed 2026-08-11** during the review of v0.10.0. Priority: low, but it is a
+real asymmetry with how the rest of this app treats money.
+
+Every expense mutation writes an `expense_history` row in the same transaction.
+Class packages write none: `create_package`, `update_package`, `delete_package`,
+`log_class` and `delete_class_event` leave no record, and there is no
+`class_history` table. `class_events` is the log of what happened in the
+classes, not of who edited the tracker. Changing `class_count` — which divides
+the money — is unrecorded, and deleting a package destroys a term of attendance
+with nothing remembering it.
+
+Related, from the same review:
+- **`archived` is unreachable.** It is threaded through the store, the API and
+  `classes_list(include_archived=…)`, but nothing can set it: the portal never
+  calls `/api/classes-update` and there is no MCP tool. Retiring a finished
+  course therefore means deleting it, which destroys the log. Either wire up
+  archiving or drop the flag.
+- **No `classes_delete` / `classes_update` MCP tool.** The owner works through
+  MCP, so removing a course is portal-only. The delete-refusal on a funding
+  payment now says "from the Classes tab in the portal" rather than naming a
+  tool that does not exist, but it is still a dead end from the MCP side.
+- **Server error strings are English only.** The portal surfaces them verbatim
+  in a toast, and its primary user reads the Chinese UI. True of every error in
+  the app, not just the class ones, which is why it is filed rather than
+  half-fixed here.
+- **A borrow-funded package is coherent but unexplained.** Nothing stops a
+  package being funded by a `category='borrow'` row, so the same ¥2,200 can read
+  as "owed back to me" on the Due tab and "remaining" on the Classes tab. No
+  total is corrupted — `Store.summarize` is untouched — but the two views
+  describe one payment two ways with nothing reconciling them.
+
+## 4. Neon's restore window has never been recorded or rehearsed
 
 **Filed 2026-08-11.** Priority: medium — this is the only item here that could
 cost real data.

@@ -72,7 +72,11 @@ CREATE INDEX IF NOT EXISTS idx_access_tokens_token ON access_tokens(token);
 -- claim the whole amount and silently double-count the money.
 CREATE TABLE IF NOT EXISTS class_packages (
   id            TEXT PRIMARY KEY,
-  expense_id    TEXT NOT NULL UNIQUE,
+  -- FK, not just a convention: the application refuses to delete a funding
+  -- payment, but that check and the delete are not one atomic step under
+  -- Postgres. Without this the loser of that race commits an orphan, and an
+  -- orphan vanishes from every read (the package SELECT inner-joins expenses).
+  expense_id    TEXT NOT NULL UNIQUE REFERENCES expenses(id),
   name          TEXT NOT NULL,
   -- 'per_class' — a pack of N classes; each attendance consumes one.
   -- 'period'    — a flat month/semester fee; each missed class is owed back.
@@ -90,7 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_class_packages_expense ON class_packages(expense_
 -- cancelled is reclaimable, what we skipped is what we forfeited.
 CREATE TABLE IF NOT EXISTS class_events (
   id          TEXT PRIMARY KEY,
-  package_id  TEXT NOT NULL,
+  package_id  TEXT NOT NULL REFERENCES class_packages(id) ON DELETE CASCADE,
   date        TEXT NOT NULL,
   kind        TEXT NOT NULL CHECK (
                 kind IN ('attended', 'missed_school', 'missed_us')

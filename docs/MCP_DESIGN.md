@@ -19,7 +19,7 @@ edit lands where it has effect.
 
 **Rule: if a behavior matters, it must be encoded in the top four rows.**
 
-## Tool inventory (10) and why
+## Tool inventory (13) and why
 
 | tool | why it exists / selection cue |
 |---|---|
@@ -32,10 +32,14 @@ edit lands where it has effect.
 | `expenses_delete` | mistakes only; destructive-flagged; description says confirm first and redirects "it's paid" to mark_paid |
 | `expenses_mint_link` / `expenses_revoke_link` | link lifecycle ("给我老婆做个链接" / kill switch) |
 | `expenses_list_links` | added v0.5.0 after live testing: revoke was **unreachable in practice** — the agent had no way to discover what to revoke, and `expenses_revoke_link` pointed it at the operator CLI, a channel an agent cannot use. Returns ids + usage, never token values, so revocation works without permanent secrets entering the chat. A cross-reference is only guidance if it names a tool the agent can actually call |
+| `classes_list` | added v0.10.0 with the class tracker: "还剩几节课" is a different question from "what do I owe", and answering it from `expenses_list` would mean the agent doing the arithmetic itself — which is where wrong money comes from |
+| `classes_add` | starts tracking a course FROM a payment already in the ledger. Deliberately cannot invent the expense: the money belongs to the ledger, and a package that carried its own amount would be a second place for the price to be wrong |
+| `classes_log` | "今天上了/取消了/没去" — the high-frequency class write. Takes fuzzy `query` on the course name like every other mutating tool, and validates the event kind BEFORE resolving the course so a bad kind does not cost a round trip |
 
 Principles: no two tools answer the same user intent; every mutating tool
 takes `query` (fuzzy, candidates-on-ambiguity, never guesses); every write
-returns the new unpaid total; params tolerate what speech produces (numbers
+returns the figure that answers the question it was called about — the unpaid
+total for expenses, classes-and-money-left for a course; params tolerate what speech produces (numbers
 or strings for amounts, omitted dates).
 
 ## Personas (MCP prompts)

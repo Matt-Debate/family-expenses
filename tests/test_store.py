@@ -639,7 +639,7 @@ class ClassTrackerTests(unittest.TestCase):
         self.store.log_class(package_id=package["id"], kind="attended")
         with self.assertRaises(ValidationError) as ctx:
             self.store.delete(expense.id)
-        self.assertIn("delete that package first", str(ctx.exception))
+        self.assertIn("Remove that course first", str(ctx.exception))
         self.assertEqual(len(self.store.list()), 1)          # nothing was removed
         self.assertEqual(len(self.store.package(package["id"])["events"]), 1)
         # and it works once the package is gone
@@ -715,6 +715,162 @@ class ClassTrackerTests(unittest.TestCase):
         _expense, package = self.pack()
         package = self.store.log_class(package_id=package["id"], kind="attended")
         self.assertEqual(package["events"][0]["date"], today_str())
+
+    # ── gaps the adversarial review found: every one of these mutations
+    #    survived the first version of this suite ────────────────────────
+    def test_attending_a_period_class_is_not_owing_it(self):
+        """Adding `attended` to the missed tally reported the WHOLE payment as
+        a debt owed back, and nothing caught it — no test had ever logged an
+        attendance against a period package."""
+        _expense, package = self.pack(amount=2000, count=8, kind="period")
+        for _ in range(8):
+            package = self.store.log_class(package_id=package["id"], kind="attended")
+        s = package["summary"]
+        self.assertEqual((s["owed"], s["owed_amount"]), (0, 0.0))
+        package = self.store.log_class(package_id=package["id"], kind="missed_school")
+        self.assertEqual(package["summary"]["owed"], 1)   # only the miss counts
+
+    def test_you_cannot_be_owed_back_more_than_you_paid(self):
+        """A wrong class_count or a bad month could log more misses than the
+        payment covers; the money must stay capped even though the count is
+        reported honestly."""
+        _expense, package = self.pack(amount=2000, count=8, kind="period")
+        for _ in range(11):
+            package = self.store.log_class(
+                package_id=package["id"], kind="missed_school"
+            )
+        s = package["summary"]
+        self.assertEqual(s["owed"], 11)            # what really happened
+        self.assertEqual(s["owed_amount"], 2000.0)  # never more than was paid
+        self.assertEqual(s["overrun"], 3)           # and the excess is visible
+
+    def test_the_period_split_reconciles_when_the_price_does_not_divide(self):
+        """¥1,000 over 3: three independent round()s gave owed ¥666.67 against
+        parts of ¥333.33 + ¥333.33 — a visible ¥0.01 hole in the figure the
+        school is being shown."""
+        _expense, package = self.pack(amount=1000, count=3, kind="period")
+        for kind in ("missed_school", "missed_us"):
+            package = self.store.log_class(package_id=package["id"], kind=kind)
+        s = package["summary"]
+        self.assertEqual(
+            round(s["reclaimable_amount"] + s["forfeited_amount"], 2), s["owed_amount"]
+        )
+
+    def test_used_and_remaining_always_sum_to_the_payment(self):
+        """Independent rounding invented or lost a cent on odd payments."""
+        for amount, count, attend in (
+            (999.99, 2, 1), (1234.57, 2, 1), (2200.01, 10, 5), (1000, 3, 1), (0.07, 3, 2)
+        ):
+            with self.subTest(amount=amount, count=count):
+                store = make_store()
+                expense = store.create(date="2026-08-03", amount=amount)
+                package = store.create_package(
+                    expense_id=expense.id, name="x", kind="per_class",
+                    class_count=count,
+                )
+                for _ in range(attend):
+                    package = store.log_class(
+                        package_id=package["id"], kind="attended"
+                    )
+                s = package["summary"]
+                self.assertEqual(
+                    round(s["used_amount"] + s["remaining_amount"], 2), s["amount"]
+                )
+
+    def test_used_amount_never_exceeds_the_payment(self):
+        _expense, package = self.pack(amount=2200, count=10)
+        for _ in range(12):
+            package = self.store.log_class(package_id=package["id"], kind="attended")
+        self.assertEqual(package["summary"]["used_amount"], 2200.0)
+        self.assertEqual(package["summary"]["overrun"], 2)
+
+    def test_neither_missed_kind_burns_a_prepaid_credit(self):
+        """Only `missed_school` was covered; making `missed_us` consume a class
+        went unnoticed, and that is a money-visible policy choice."""
+        for kind in ("missed_school", "missed_us"):
+            with self.subTest(kind=kind):
+                store = make_store()
+                expense = store.create(date="2026-08-03", amount=2200)
+                package = store.create_package(
+                    expense_id=expense.id, name="x", kind="per_class", class_count=10
+                )
+                package = store.log_class(package_id=package["id"], kind=kind)
+                self.assertEqual(package["summary"]["remaining"], 10)
+                self.assertEqual(package["summary"]["remaining_amount"], 2200.0)
+
+    def test_the_supplied_date_is_the_one_recorded(self):
+        """Only the omitted-date default was pinned, so a store that ignored
+        the date entirely and always stamped today passed."""
+        _expense, package = self.pack()
+        package = self.store.log_class(
+            package_id=package["id"], kind="attended", date="2026-08-05"
+        )
+        self.assertEqual(package["events"][0]["date"], "2026-08-05")
+
+    def test_the_period_label_survives_the_round_trip(self):
+        _expense, package = self.pack(label="8月")
+        self.assertEqual(self.store.package(package["id"])["period_label"], "8月")
+
+    def test_the_database_refuses_a_second_package_on_one_payment(self):
+        """The Python pre-check was tested; the constraint behind it was not."""
+        expense, _package = self.pack()
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.db.tx() as tx:
+                tx.execute(
+                    "INSERT INTO class_packages (id, expense_id, name, kind, "
+                    "class_count, archived, created_at, updated_at) VALUES "
+                    "('dup', :eid, 'x', 'per_class', 1, FALSE, 'now', 'now')",
+                    {"eid": expense.id},
+                )
+
+    def test_a_lost_race_reads_as_a_reason_not_a_crash(self):
+        """The duplicate pre-check is not atomic with the insert, and since
+        v0.9.0 the handlers run in a threadpool — so the UNIQUE index can be
+        what fires. The caller must still get the coaching, not a 500 carrying
+        a driver traceback. Simulated by blinding the pre-check, which is
+        exactly what a concurrent transaction does to it."""
+        expense, _package = self.pack()
+        self.store._duplicate_package = lambda tx, expense_id: None
+        with self.assertRaises(ValidationError) as ctx:
+            self.store.create_package(
+                expense_id=expense.id, name="again", kind="per_class", class_count=5
+            )
+        self.assertIn("already tracked", str(ctx.exception))
+        self.assertIn("classes_list", str(ctx.exception))
+
+    def test_the_type_cannot_change_once_classes_are_logged(self):
+        """Flipping kind silently reinterprets the whole log: attendances stop
+        drawing down and misses become money owed."""
+        _expense, package = self.pack()
+        self.store.log_class(package_id=package["id"], kind="attended")
+        with self.assertRaises(ValidationError) as ctx:
+            self.store.update_package(package["id"], fields={"kind": "period"})
+        self.assertIn("cannot be changed", str(ctx.exception))
+        # ...but it is fine before anything is logged
+        _e2, fresh = self.pack(amount=500, label="9月")
+        self.assertEqual(
+            self.store.update_package(fresh["id"], fields={"kind": "period"})["kind"],
+            "period",
+        )
+
+    def test_a_fractional_class_count_is_refused(self):
+        """int(1.9) is 1, and the count divides the money."""
+        expense = self.store.create(date="2026-08-03", amount=100)
+        for bad in (1.9, True):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValidationError):
+                    self.store.create_package(
+                        expense_id=expense.id, name="x", kind="per_class",
+                        class_count=bad,
+                    )
+
+    def test_a_missing_package_says_where_package_ids_come_from(self):
+        """The inherited message pointed at expenses_list, which cannot
+        produce a package id (P3)."""
+        with self.assertRaises(KeyError) as ctx:
+            self.store.package("nope")
+        self.assertIn("classes_list", str(ctx.exception))
+        self.assertNotIn("expenses_list", str(ctx.exception))
 
     def test_archived_packages_are_hidden_unless_asked_for(self):
         _expense, package = self.pack()

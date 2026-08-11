@@ -145,9 +145,11 @@ def api_classes_list(store: Store, body: dict) -> tuple[int, dict]:
     packages = store.list_packages(
         include_archived=bool(body.get("include_archived"))
     )
-    # the payments not yet tracked by a package, so the add form can offer them
-    # instead of asking her to type an amount that already exists in the ledger
-    linked = {p["expense_id"] for p in store.list_packages(include_archived=True)}
+    # The payments not yet tracked, so the add form can offer them instead of
+    # asking her to retype an amount the ledger already holds. Taken from a
+    # cheap id-only query: calling list_packages again would re-run the join,
+    # re-scan every class event and re-summarize, all to read one column.
+    linked = store.linked_expense_ids()
     candidates = [
         {"id": e.id, "date": e.date, "amount": e.amount,
          "description": e.description, "category": e.category, "paid": e.paid}

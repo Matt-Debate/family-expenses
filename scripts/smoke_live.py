@@ -162,6 +162,7 @@ async def exercise_public_mcp(base: str) -> None:
                 "expenses_mark_paid", "expenses_update", "expenses_delete",
                 "expenses_history", "expenses_mint_link", "expenses_revoke_link",
                 "expenses_list_links",
+                "classes_list", "classes_add", "classes_log",
             }
             assert {tool.name for tool in tools.tools} == expected_tools
             assert {prompt.name for prompt in prompts.prompts} == {

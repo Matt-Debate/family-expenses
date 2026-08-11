@@ -44,6 +44,55 @@ carry them.)
   Cascading would silently destroy an attendance log that took a term to build;
   the error says what to do instead.
 
+### Fixed after review
+Four independent passes (two adversarial agents, a cross-model Codex review,
+and mutation testing) went over the first draft. All three reviewers
+independently found the same two defects, and the mutation run showed **ten
+ways to corrupt this feature's money that the suite let through**. Both are
+fixed, and every one of those mutations is now caught.
+
+- **The tab did not work.** Class rows reuse the expense list's `.ex-hd`
+  markup, and a document-level handler bound to it called `toggleItem(null)` →
+  re-render, closing the row the class handler had just opened. Tapping a
+  course never revealed its class log. Separately, `.btns { display:flex }`
+  out-ranked the UA `[hidden]` rule, so every row showed its action buttons —
+  including Delete — permanently. Neither was visible from the API tests,
+  which is all the first draft had.
+- **A period package could report owing back more than was ever paid.** A
+  wrong `class_count` or a bad month made `owed_amount` unbounded: ¥2,000 paid,
+  ¥2,750 "owed". Money is now capped at the payment and the excess surfaces as
+  `overrun`, matching what the per-class branch already did.
+- **The reclaimable/forfeited split did not reconcile with the total.** Three
+  independent `round()` calls meant ¥1,000 over 3 classes reported owed ¥666.67
+  against parts of ¥333.33 + ¥333.33. `owed_amount` is now derived from its own
+  parts, and `remaining_amount` by subtraction, so both always sum exactly.
+- **The class figures were rounded to whole yuan in the portal** while the
+  server and MCP reported cents — ¥667 on the tab whose job is telling a school
+  what it owes.
+- **`scripts/smoke_live.py` asserted an exact 10-tool set** and would have
+  failed the next deploy. This is the second release running in which the
+  post-deploy gate was broken by a change that never touched it.
+- **A missing package reported "no expense with id …"** and pointed at
+  `expenses_list`, which cannot produce a package id (P3). `PackageNotFoundError`
+  names `classes_list`.
+- **A lost UNIQUE race surfaced as a 500.** The duplicate pre-check is not
+  atomic with the insert and the handlers run in a threadpool, so the constraint
+  can be what fires; it is now translated to the same coaching the pre-check gives.
+- **Changing a package's `kind` silently reinterpreted its whole log** —
+  attendances stopped drawing down, misses became money owed. Refused once
+  anything is logged.
+- **Foreign keys** on `class_packages.expense_id` and `class_events.package_id`.
+  The application refuses to delete a funding payment, but that check and the
+  delete are not one atomic step; without the constraint the loser of that race
+  commits an orphan, and an orphan vanishes from every read.
+- A fractional `class_count` (JSON `1.9`) silently truncated to `1`, and the
+  count divides the money. Refused.
+- The Classes tab now tags each fetch with a generation number (a slow earlier
+  response could repaint stale totals) and disables a log button in flight (a
+  double tap logged the class twice — on a period package, claiming another
+  class back from the school).
+- `/api/classes-list` read the whole package list twice to collect one column.
+
 ### Changed
 - `classes_log` validates the event kind **before** resolving which course was
   meant — a bad kind is wrong whichever course it is, and reporting "no such
