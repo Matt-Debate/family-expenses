@@ -1,5 +1,17 @@
 # Implementation Plan — Family Expenses (standalone)
 
+> **HISTORICAL RECORD — frozen at v0.2.0 (2026-07-14).** This is the plan the
+> app was built to, kept for the reasoning behind the original chunking and the
+> carried-over review findings. It is **not** a description of the app as it
+> stands: it was written before the MCP surface grew from five tools to ten,
+> before the portal gained a login, and before most of the money semantics
+> existed. For what is true now use `docs/CHANGELOG.md` and `git log`; for what
+> the app must do, `docs/FEATURE_CONTRACT.md`.
+>
+> Contract §10 used to promise this file stayed in sync with behavior. It never
+> did, and a plan that tracks its own execution is just a worse changelog — so
+> §10 now names it a historical record instead.
+
 **Companion to:** `FEATURE_CONTRACT.md` v0.2.0. Work is delivered in chunks;
 each chunk is committed and **pushed to `claude/family-expenses-setup-8uvrks`**
 when complete (owner direction, 2026-07-14).
@@ -27,14 +39,16 @@ streamable-HTTP MCP. That repo receives **no commits or pushes**.
   against sqlite (runs in CI with no Postgres — acceptance A6).
 
 ## Chunk 3 — Portal web app  ✅
-- `app/web.py` — Starlette app: `GET /t/<token>` (portal page), `GET /healthz`,
-  the six `/api/*` JSON endpoints (token revalidated per request).
+- `app/web.py` — Starlette app: `GET /t/<token>` (portal page), the health
+  endpoint (planned as `/healthz`; both `/health` and `/healthz` ship), the six
+  `/api/*` JSON endpoints (token revalidated per request).
 - `app/portal.html` — single-file mobile-first UI, 中文 default + EN toggle.
 - `tests/test_web.py` — endpoint tests via Starlette TestClient (sqlite).
 
 ## Chunk 4 — MCP + deploy  ✅
 - `app/mcp_server.py` — FastMCP (`mcp>=1.12,<2`, same as work-dashboards)
-  exposing the five tools (contract §7); mounted at `/mcp` on the same
+  exposing the five tools planned at v0.2.0 — ten as of v0.5.0 (contract §7);
+  mounted at `/mcp` on the same
   Starlette app; `app/main.py` entrypoint (uvicorn, `$PORT`).
 - `Dockerfile`, `cloudbuild.yaml` — mirroring the work-dashboards
   `Dockerfile.mcp` / `cloudbuild.mcp.yaml` shape.

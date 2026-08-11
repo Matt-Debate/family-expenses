@@ -336,7 +336,14 @@
     if (Math.abs(n) >= 1000) return "¥" + (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
     return "¥" + n.toLocaleString();
   }
+  // The server's today, in the household's timezone (APP_TZ), delivered by
+  // /api/list. Everything on this page — overdue or not, which month is
+  // current, where the History past/future line falls — used to come from the
+  // phone's clock, which can disagree with the server that decides the same
+  // things. The device is only the fallback for the first paint.
+  var serverToday = null;
   function todayStr() {
+    if (serverToday) return serverToday;
     var d = new Date();
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
   }
@@ -630,7 +637,9 @@
   // Spend = paid, excluding borrow (she fronted that; repaying is not household
   // spending), bucketed by DUE month so this agrees with the statement tab.
   function lastMonths(n) {
-    var out = [], d = new Date(), y = d.getFullYear(), m = d.getMonth();
+    // anchored on the server's today like every other date decision here
+    var parts = todayStr().split("-");
+    var out = [], y = Number(parts[0]), m = Number(parts[1]) - 1;
     for (var i = n - 1; i >= 0; i--) {
       var dt = new Date(y, m - i, 1);
       out.push(dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0"));
@@ -815,6 +824,13 @@
     return api("list", {status:"all"}).then(function (j) {
       expenses = j.expenses || [];
       summary = j.summary || {};
+      if (j.today) {
+        serverToday = j.today;
+        // the add form's date defaults to today; correct it if the phone was
+        // a day out, but never overwrite a date she has already chosen
+        var dateEl = $("date");
+        if (!dateEl.dataset.touched) dateEl.value = serverToday;
+      }
       render();
     }).catch(function (e) { toast(e.message); });
   }
@@ -909,6 +925,7 @@
 
   // ---- init ----
   $("date").value = todayStr();
+  $("date").addEventListener("input", function () { this.dataset.touched = "1"; });
   applyLang();
   refresh();
 })();

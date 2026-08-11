@@ -26,6 +26,26 @@ class ValidationError(ValueError):
     """Caller-supplied data failed validation."""
 
 
+class NotFoundError(KeyError):
+    """No expense with that id.
+
+    Subclasses KeyError so the HTTP layer's existing ``except KeyError`` → 404
+    mapping is untouched, but ``str()`` is coaching rather than a repr'd id.
+    The MCP path has no translation layer of its own, so the agent used to see
+    the bare id — which says nothing about how to retry.
+    """
+
+    def __init__(self, expense_id: Any):
+        self.expense_id = expense_id
+        super().__init__(
+            f"no expense with id {expense_id!r} — ids come from expenses_list; "
+            "or target it by query=<a word from its description> instead"
+        )
+
+    def __str__(self) -> str:  # KeyError.__str__ repr()s args[0]
+        return self.args[0]
+
+
 _ALLOWED_UPDATE_FIELDS = frozenset(
     {"date", "amount", "currency", "category", "description", "submitted_by"}
 )
@@ -88,15 +108,33 @@ def today_str() -> str:
         from zoneinfo import ZoneInfo
 
         return datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d")
-    except Exception:
+    except Exception as exc:
+        # Falling back to UTC is the safe move for a live service — but it puts
+        # a China household on the wrong day after 08:00 CST, so it must not be
+        # silent. `tzdata` is a pinned runtime dependency precisely so this
+        # branch stays unreachable; BacklogRegressionTests proves the zone data
+        # is present and that APP_TZ is honoured.
+        import sys
+
+        print(
+            f"WARNING: APP_TZ={tz_name!r} unusable ({exc!r}); dates fall back to UTC",
+            file=sys.stderr,
+        )
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 # tolerated decoration around spoken/pasted amounts: ¥300, 300块, 1,200元, "300 rmb"
 _AMOUNT_NOISE_RE = re.compile(r"[¥￥,，\s]|元|块|rmb|cny", re.IGNORECASE)
 
+# LIKE metacharacters in a user's search string. Unescaped, query='%' matched
+# every row in the ledger — an agent asked to find one expense got all of them.
+_LIKE_SPECIALS_RE = re.compile(r"([\\%_])")
+
 
 class Store:
+    #: the household's only currency — see _validate_currency
+    CURRENCY = "CNY"
+
     def __init__(self, db: Database):
         self.db = db
 
@@ -132,6 +170,27 @@ class Store:
                 f"{field} {text!r} invalid — use YYYY-MM-DD (e.g. 2026-07-14); "
                 "convert relative words like 昨天/yesterday to a real date, or "
                 "omit the field to default to today"
+            )
+        return text
+
+    @classmethod
+    def _validate_currency(cls, value: Any) -> str:
+        """This ledger is CNY-only, and says so rather than quietly lying.
+
+        `currency` has always been stored, and every total — summarize(), the
+        portal cards, the charts — adds `amount` without ever consulting it. One
+        non-CNY row would therefore make every monetary figure in the app
+        silently wrong. Nothing can write one today (the portal has no currency
+        field and the MCP exposes no parameter), so refusing is free; carrying
+        an exchange rate would be a real feature this household has no use for.
+        """
+        text = (str(value).strip().upper() if value else "") or cls.CURRENCY
+        if text != cls.CURRENCY:
+            raise ValidationError(
+                f"currency {text!r} not supported — this ledger is "
+                f"{cls.CURRENCY} only. Every total adds amounts without "
+                "converting them, so one foreign row would make all of them "
+                f"wrong. Convert the amount to {cls.CURRENCY} first."
             )
         return text
 
@@ -181,15 +240,28 @@ class Store:
         self, *, date: str, amount: Any, currency: str = "CNY",
         category: Optional[str] = None, description: Optional[str] = None,
         submitted_by: Optional[str] = None,
+        paid: bool = False, paid_date: Optional[str] = None,
     ) -> Expense:
+        """Insert one expense, optionally already paid.
+
+        ``paid`` exists so "昨天交了300的足球课" is a single transaction. The MCP
+        used to create the row and then mark it paid in a second transaction: if
+        the second failed, the row persisted as unpaid while the tool reported
+        failure — the same-transaction history guarantee broken at the tool
+        boundary. One row in, one ``create`` history entry describing it.
+        """
         date = self._validate_date(date)
         amount = self._validate_amount(amount)
-        currency = (str(currency).strip() if currency else "") or "CNY"
+        currency = self._validate_currency(currency)
+        paid = bool(paid)
+        # an expense recorded as already-paid but with no date given was paid
+        # when it came due — that is the only date the caller has actually told us
+        paid_date = self._validate_date(paid_date or date, field="paid_date") if paid else None
         now = _utc_now_iso()
         expense = Expense(
             id=generate_id(), date=date, amount=amount, currency=currency,
-            category=category, description=description, paid=False,
-            paid_date=None, submitted_by=submitted_by,
+            category=category, description=description, paid=paid,
+            paid_date=paid_date, submitted_by=submitted_by,
             created_at=now, updated_at=now,
         )
         with self.db.tx() as tx:
@@ -223,7 +295,7 @@ class Store:
             elif key == "date":
                 clean[key] = self._validate_date(value)
             elif key == "currency":
-                clean[key] = (str(value).strip() if value else "") or "CNY"
+                clean[key] = self._validate_currency(value)
             else:
                 clean[key] = value
         clean["updated_at"] = _utc_now_iso()
@@ -235,7 +307,7 @@ class Store:
                 dict(clean, expense_id=expense_id),
             )
             if cur.rowcount == 0:
-                raise KeyError(expense_id)
+                raise NotFoundError(expense_id)
             expense = self._row_to_expense(self._fetch(tx, expense_id))
             self._write_history(tx, expense_id, "update", changed_by, expense.to_dict())
         return expense
@@ -256,7 +328,7 @@ class Store:
                 },
             )
             if cur.rowcount == 0:
-                raise KeyError(expense_id)
+                raise NotFoundError(expense_id)
             expense = self._row_to_expense(self._fetch(tx, expense_id))
             action = "mark_paid" if paid else "unmark_paid"
             self._write_history(tx, expense_id, action, changed_by, expense.to_dict())
@@ -324,9 +396,12 @@ class Store:
         Powers natural-language targeting from the MCP ("the football class")
         so callers don't need ids.
         """
-        needle = f"%{str(query or '').strip().lower()}%"
+        # escape the caller's own %/_/\ so they match literally: query='%'
+        # is someone looking for a percent sign, not for the whole ledger
+        needle = "%" + _LIKE_SPECIALS_RE.sub(r"\\\1", str(query or "").strip().lower()) + "%"
         clauses = [
-            "(LOWER(COALESCE(description,'')) LIKE :q OR LOWER(COALESCE(category,'')) LIKE :q)"
+            r"(LOWER(COALESCE(description,'')) LIKE :q ESCAPE '\' "
+            r"OR LOWER(COALESCE(category,'')) LIKE :q ESCAPE '\')"
         ]
         params: dict[str, Any] = {"q": needle}
         self._status_clause(status, clauses, params)

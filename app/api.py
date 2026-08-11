@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .store import Store, ValidationError
+from .store import NotFoundError, Store, ValidationError, today_str
 
 
 _LINK_LABEL = "_link_label"  # set by _guard from the validated token, never the client
@@ -79,6 +79,11 @@ def api_list(store: Store, body: dict) -> tuple[int, dict]:
         # summarize the rows we are actually returning: a filtered list under a
         # whole-ledger headline is a wrong number in the most visible place
         "summary": store.summarize(expenses),
+        # the household's today (APP_TZ), so the page stops asking the phone.
+        # The server already decides overdue-ness this way; when the two
+        # disagreed — a travelling phone, a wrong clock — a row moved between
+        # Due and Upcoming depending on who you asked.
+        "today": today_str(),
     }
 
 
@@ -121,7 +126,7 @@ def api_mark_paid(store: Store, body: dict) -> tuple[int, dict]:
 def api_delete(store: Store, body: dict) -> tuple[int, dict]:
     deleted = store.delete(str(body.get("id")), changed_by=_author(body, "changed_by"))
     if not deleted:
-        raise KeyError(body.get("id"))
+        raise NotFoundError(body.get("id"))
     return 200, {"ok": True}
 
 

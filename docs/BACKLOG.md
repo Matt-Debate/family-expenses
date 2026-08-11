@@ -4,12 +4,19 @@ Known, deliberately-not-done items. Nothing here blocks daily use — the ledger
 is live and in use by two people since 2026-08-11. Each entry says why it was
 deferred, so a future session can judge whether that reasoning still holds.
 
+**Cleared 2026-08-11 (v0.9.0):** every code defect that was filed here is fixed
+with a regression test, and the two operational unknowns turned out to need no
+action. See `docs/CHANGELOG.md` [0.9.0] for what each one actually cost. What
+survives below is one item the owner deliberately deferred and one that cannot
+be verified from inside this repo.
+
 ---
 
 ## 1. Move the portal to its own Auth0 tenant
 
-**Filed 2026-08-11.** Priority: low. The cheap window (before she was onboarded)
-has already passed — see the A8 cost below before deciding this is worth doing.
+**Filed 2026-08-11. Deferred by the owner the same day** ("forget the logo and
+app name, file it as a long term improvement"). Priority: low. Do not do this
+without asking — it is the one item here that costs her something.
 
 **Symptom.** The portal login page shows the WorkOS logo and labeling, which is
 wrong for a household expense app.
@@ -22,13 +29,12 @@ where any remaining "WorkOS" *text* comes from. The only isolated lever is the
 application's own `logo_uri`, and the tenant is on New Universal Login, which does
 not reliably honor per-application logos.
 
-**The real reason to do it.** `CLAUDE.md` states this project is "deliberately
-unrelated to the owner's `work-dashboards` repo" and that isolation is
-"structural (own repo, own database, own services)". Adding portal OAuth in
-v0.5.0 put a shared **Auth0 tenant** underneath both — the first shared
-dependency between them. Branding is the visible symptom; the coupling is the
-actual issue. A separate tenant restores the stated isolation and makes the
-branding question disappear on its own.
+**The real reason to do it.** The contract calls this project's isolation from
+`work-dashboards` "structural (own repo, own database, own services)". Adding
+portal OAuth in v0.5.0 put a shared **Auth0 tenant** underneath both. (The GCP
+project is shared too — `work-dashboards`, 693424932326 — which the contract
+never claimed otherwise, but it is worth knowing when reasoning about
+isolation.) Branding is the visible symptom; the coupling is the actual issue.
 
 **What it involves.** New tenant (e.g. `family-expenses.jp.auth0.com`), new
 Regular Web Application, recreate the one user, own branding, then swap
@@ -40,82 +46,36 @@ sessions: anyone signed in is signed out once and must log in again against the
 new tenant. This was free before onboarding. **She was onboarded on 2026-08-11**
 and is now using the portal daily, so doing this costs her one forced re-login
 with a new password — exactly the friction §5.1 exists to prevent. Not fatal,
-but it must now be scheduled and explained to her rather than done quietly.
-Weigh it against the fact that the only symptom is a logo.
+but it must be scheduled and explained to her rather than done quietly. Weigh it
+against the fact that the only symptom is a logo.
 
 ---
 
-## 2. The portal decides "today" from the device, not APP_TZ
+## 2. Neon's restore window has never been recorded or rehearsed
 
-**Filed 2026-08-11.** Priority: low while she is in China.
+**Filed 2026-08-11.** Priority: medium — this is the only item here that could
+cost real data.
 
-Every date decision in `app/portal.html` — which month is current, whether a row
-is overdue, the History past/future split — comes from `todayStr()`, which reads
-the phone's clock. The server has `APP_TZ` (Asia/Shanghai) and uses it for
-"today" defaults, so the two can disagree: travel across a date line, or a
-misconfigured phone, shifts a row between Due and Upcoming, or a month between
-History and Scheduled, around midnight.
+`FIRST_DEPLOY_PLAN.md` "Operations after launch" calls for confirming the
+point-in-time-restore window and rehearsing a restore. Neither happened.
+Backups are currently an assumption, not a verified capability, and this is
+19 rows of real money with an append-only audit trail that only exists in one
+place.
 
-**Fix.** Have `/api/list` return the server's `today` and let the portal use it
-instead of computing one. Contained, but it touches every `todayStr()` call
-site, so it is not a one-liner. Found by cross-model review of v0.8.0.
+**Why it is still open.** It cannot be checked from inside this repo: there is
+no Neon CLI installed and no API key in the environment, so the retention window
+is only visible in the Neon console. Rehearsing a restore also creates a Neon
+branch — an action against live infrastructure that needs the owner's
+go-ahead rather than an agent's initiative.
 
-## 3. Currencies are summed without conversion
-
-**Filed 2026-08-11.** Priority: low today, total-correctness bug the moment it
-is not.
-
-`expenses.currency` exists and defaults to CNY, but every total —
-`summarize()`, the portal cards, the charts — adds `amount` regardless of
-currency. One non-CNY row makes every monetary figure in the app silently
-meaningless. Nothing currently writes anything but CNY, and the portal cannot;
-only an MCP caller passing `currency=` explicitly could.
-
-**Options.** Reject non-CNY at the store (honest, one line, matches the
-household's reality), or carry a rate and convert (real feature). Rejecting is
-almost certainly right for this app. Predates v0.8.0; surfaced by the same review.
-
-## 4. Correctness items found in the 2026-08-10 audit, still unfixed
-
-Reported and verified during the audit. The `since`/`until`-with-`query` bug
-and the diverging `status` handling were fixed in 0.8.0/0.8.1; the rest stand.
-
-- **`store.find` builds its LIKE pattern without escaping `%`/`_`**, so
-  `query="%"` matches every row. (The status half of this was fixed in 0.8.1:
-  `list()` and `find()` now share `_status_clause()`.)
-- **Portal DB calls block the event loop** (`app/web.py`). Handlers are
-  `async def` but call the store synchronously; `/api/list` is three sequential
-  blocking transactions. MCP is unaffected (FastMCP uses a threadpool).
-- **`APP_TZ` is unpinned by any test.** Every date assertion is a shape-only
-  regex, and `today_str()` falls back to UTC via a bare `except`. On an image
-  missing `tzdata` a China household silently gets the wrong day after 08:00 CST
-  with the suite green.
-- **Bare `KeyError` reaches MCP callers** as just the expense id
-  (`app/store.py`). The HTTP path translates it to a clean 404; the MCP path has
-  no equivalent, contradicting the "every error string is coaching" design.
-- **`expenses_add(paid=true)` spans two transactions** — `create` then
-  `mark_paid`. If the second fails the row persists as unpaid while the agent
-  reports failure, breaking the same-transaction history invariant at the tool
-  boundary.
-- **`expense_history.seq` has no uniqueness constraint** and is computed as a
-  `COUNT(*)` inside the transaction. Concurrent deletes could duplicate a `seq`.
-  Very unlikely at household scale; a `UNIQUE(expense_id, seq)` would turn silent
-  corruption into a loud error.
-
-## 5. Operations
-
-- **`maxScale` disagrees between levels** — the serving revision carries
-  `autoscaling.knative.dev/maxScale=3`, the service carries
-  `run.googleapis.com/maxScale=20`. Which governs was not determined.
-- **No GCP budget alert.** `FIRST_DEPLOY_PLAN.md` "Operations after launch"
-  calls for one; it was never created.
-- **Neon restore window never recorded or rehearsed**, also called for in the
-  same section. Backups are currently an assumption, not a verified capability.
-
-## 6. Doc drift
-
-- **`docs/IMPLEMENTATION_PLAN.md` is frozen at v0.2.0** — says "five tools"
-  (there are 10) and references `/healthz` as the health endpoint. The contract
-  claims this file stays in sync; it does not.
-- **`CHANGELOG.md` `[Unreleased]`** still holds work that shipped in 0.4.2–0.4.4.
-  Left alone deliberately rather than guess which release each item belongs to.
+**What to do, in order.**
+1. Read the retention window: Neon console → project → Settings → *Restore
+   window* (free tier has historically been 24h; paid tiers 7–30 days). Record
+   the actual number here.
+2. Rehearse: create a branch from a timestamp ~1 hour ago, point a throwaway
+   `DATABASE_URL` at it, and run
+   `python3 -c "import os,psycopg;print(psycopg.connect(os.environ['DATABASE_URL']).execute('select count(*) from expenses').fetchone())"`.
+   Delete the branch afterwards. Nothing touches the primary.
+3. A cheaper standing backstop, if the window turns out to be short: a periodic
+   `pg_dump` to local storage. Note that the dump contains real household
+   financial data and every live portal token — treat it like a secret (P9).

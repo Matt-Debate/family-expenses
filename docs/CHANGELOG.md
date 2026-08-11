@@ -4,15 +4,81 @@ Semantic versioning. Unreleased work accumulates under [Unreleased] and is cut
 to a release entry when a chunk set ships.
 
 ## [Unreleased]
-### Ops / handoff
-- `CLAUDE.md`: project instructions for future sessions (compatibility
-  contract first, MCP-editing rules, map, commands) + one-time PC deploy
-  checklist (rename repo, merge, Neon, deploy, live smoke, mint link,
-  connect MCP).
-- `scripts/smoke_live.py`: post-deploy verification — proves schema applies
-  to real Postgres and exercises the deployed service end-to-end over the
-  public URL, with cleanup. Production entrypoint (`python -m app.main` with
-  $PORT) rehearsed in-session: health + portal routes OK.
+
+Nothing pending. (The block that sat here described `CLAUDE.md` and
+`scripts/smoke_live.py`, both of which shipped in 0.4.2–0.4.4 and were never
+moved into a release entry; `git log` places them and the entries below now
+carry them.)
+
+## [0.9.0] — 2026-08-11
+
+Clears `docs/BACKLOG.md`: every deferred code defect is fixed, the two
+operational unknowns are resolved, and the doc drift is gone. Each fix has a
+regression test that was observed failing against the unfixed code first.
+
+### Fixed
+- **A search for a literal `%` returned the entire ledger.** `store.find` built
+  its LIKE pattern without escaping `%`/`_`/`\`, so those characters in a
+  natural-language query acted as wildcards — an agent told to find one expense
+  could be handed all of them and act on the wrong row.
+- **`expenses_add(paid=true)` spanned two transactions** — create, then
+  mark_paid. A failure in between left the expense saved-but-unpaid while the
+  tool reported an error, breaking the same-transaction history guarantee at the
+  tool boundary. `Store.create` now takes `paid`/`paid_date` and writes one row
+  with one `create` history entry. An already-paid expense with no payment date
+  given is dated to its due date rather than to today.
+- **A missing expense raised a bare `KeyError`**, which the HTTP layer turned
+  into a clean 404 but the MCP surfaced to the agent as just the id — no hint
+  about how to retry. `NotFoundError` subclasses `KeyError` (so the 404 mapping
+  is untouched) and carries coaching text naming `query=` as the alternative.
+- **The portal decided "today" from the phone's clock** while the server used
+  `APP_TZ`, so a travelling or mis-set device could move a row between Due and
+  Upcoming, or a month between History and Scheduled. `/api/list` now returns
+  the household's `today` and the page uses it; the device is only the
+  first-paint fallback.
+- **Every API handler blocked the event loop.** The handlers are synchronous and
+  all of them hit the database, so one slow round trip to Neon stalled every
+  other request in the process, `/health` included. They now run in a
+  threadpool — free, because production is on Neon's pooled endpoint and
+  Postgres connections here are already thread-local.
+- **`APP_TZ` was pinned by no test.** Every date assertion was a shape-only
+  regex and `today_str()` fell back to UTC through a bare `except`, so an image
+  without `tzdata` would silently put a China household a day behind with the
+  suite green. Two zones 25 hours apart now pin the behavior, a test asserts the
+  zone data is present, and the fallback logs a warning instead of hiding.
+
+### Added
+- **`db/hardening.sql` + `Database._apply_hardening`** — a `UNIQUE(expense_id,
+  seq)` index on `expense_history`. `seq` is computed inside the write
+  transaction, so two concurrent mutations of the same expense could both claim
+  it and silently corrupt the audit order. Applied **best-effort**, each
+  statement in its own transaction with a logged warning on failure: this is a
+  live portal, and a constraint that cannot apply to existing data must not be
+  able to stop the service from starting. Production verified free of duplicates
+  before shipping.
+
+### Changed
+- **The ledger is CNY-only, and now says so.** `currency` was stored but never
+  consulted — `summarize()`, the portal cards and the charts all add `amount`
+  regardless — so a single foreign row would have made every monetary figure in
+  the app silently wrong. Non-CNY is refused at the store with an error that
+  explains why. Nothing could write one anyway (the portal has no currency
+  field, the MCP no parameter), and all 19 production rows are CNY.
+- `docs/IMPLEMENTATION_PLAN.md` is labelled a **historical record** frozen at
+  v0.2.0, and contract §10 no longer claims it stays in sync. It said "five
+  tools" (ten) and named `/healthz` as the health endpoint; both are annotated
+  rather than rewritten, since the point of the file is what was planned.
+
+### Operations (investigated, no change needed)
+- **The `maxScale` disagreement was not one.** `autoscaling.knative.dev/maxScale=3`
+  on the revision template is the per-revision cap and governs the running
+  revision (set by `deploy.sh --max-instances=3`);
+  `run.googleapis.com/maxScale=20` on the service is Cloud Run's separate
+  service-level ceiling across revisions. Effective limit: 3 instances.
+- **The GCP budget alert already exists.** The item assumed a dedicated project;
+  the service runs in `work-dashboards` (693424932326), covered by a $15/month
+  project-scoped budget alerting at 50/90/100% and by a billing-account-wide $5
+  budget. Nothing to create.
 
 ## [0.8.2] — 2026-08-11
 

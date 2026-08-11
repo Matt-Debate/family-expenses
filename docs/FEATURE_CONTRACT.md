@@ -1,6 +1,6 @@
 # Feature Contract — Family Expenses
 
-**Status:** ACTIVE (v0.8.1 — deployed; in daily household use since 2026-08-11)
+**Status:** ACTIVE (v0.9.0; v0.8.1 deployed — in daily household use since 2026-08-11)
 **Owner:** matt-debate
 **Repo:** `Matt-Debate/family-expenses`
 **Default branch:** `main`
@@ -55,7 +55,7 @@ no arrays, no PG-only expressions.
 | `id` | TEXT PK | 12-hex app-generated |
 | `date` | TEXT NOT NULL | `YYYY-MM-DD` — the **due** date: when it must be paid |
 | `amount` | REAL NOT NULL CHECK > 0 | |
-| `currency` | TEXT NOT NULL DEFAULT 'CNY' | code only, no FX |
+| `currency` | TEXT NOT NULL DEFAULT 'CNY' | **CNY only, enforced** — every total adds `amount` without conversion, so one foreign row would falsify all of them |
 | `category` | TEXT | free text; canonical keys in `store.CATEGORIES`. **`borrow` is arithmetic-bearing** — money she fronted, owed back, excluded from every household total |
 | `description` | TEXT | what it was |
 | `paid` | BOOLEAN NOT NULL DEFAULT FALSE | |
@@ -111,7 +111,7 @@ portal page and the MCP mount.
 
 | endpoint | body (besides `token`) | effect |
 |---|---|---|
-| `/api/list` | `status?: all\|paid\|unpaid\|overdue, since?, until?` | matching expenses + **totals for exactly those rows** (`Store.summarize`) |
+| `/api/list` | `status?: all\|paid\|unpaid\|overdue, since?, until?` | matching expenses + **totals for exactly those rows** (`Store.summarize`) + `today` in `APP_TZ`, so the page never has to ask the device |
 | `/api/submit` | `date, amount, currency?, category?, description?, submitted_by?` | insert + history(`create`) |
 | `/api/update` | `id, fields{date?,amount?,currency?,category?,description?,submitted_by?}, changed_by?` | update + history(`update`) |
 | `/api/mark-paid` | `id, paid, paid_date?, changed_by?` | set paid state + history(`mark_paid`/`unmark_paid`) |
@@ -185,5 +185,7 @@ Claude Design (Fable), v0.7.0: a typographic ledger on warm paper.
 ## 10. Versioning & docs
 
 Semantic versioning in `docs/CHANGELOG.md`. `README.md` (user-facing),
-`docs/RUNBOOK.md` (deploy, mint links, rotate/revoke), this contract, and the
-implementation plan stay in sync with behavior changes.
+`docs/RUNBOOK.md` (deploy, mint links, rotate/revoke) and this contract stay in
+sync with behavior changes. `docs/IMPLEMENTATION_PLAN.md` is a **historical
+record** frozen at v0.2.0, not a living document — it claimed otherwise for six
+versions while saying "five tools".

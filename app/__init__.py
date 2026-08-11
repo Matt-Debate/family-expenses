@@ -4,4 +4,4 @@ See docs/FEATURE_CONTRACT.md. Single-tenant by design; isolation from any
 business system is structural (own repo, own database, own services).
 """
 
-__version__ = "0.8.2"
+__version__ = "0.9.0"

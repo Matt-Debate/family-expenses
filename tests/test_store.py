@@ -381,5 +381,115 @@ class CodexVerifyRegressionTests(unittest.TestCase):
         self.assertEqual(forward["total"], backward["total"])
 
 
+class BacklogRegressionTests(unittest.TestCase):
+    """docs/BACKLOG.md §2–§4 — items filed as known-and-deferred, now closed.
+
+    Each test was written against the unfixed code first and observed to fail;
+    the entries in the backlog say what each defect actually costs.
+    """
+
+    def setUp(self):
+        self.store = make_store()
+
+    # §4 — find() built its LIKE pattern without escaping
+    def test_like_wildcards_in_a_query_are_literal(self):
+        """query='%' matched every row, so an agent searching for a literal
+        percent sign got the whole ledger back and could act on the wrong one."""
+        self.store.create(date="2026-08-01", amount=10, description="足球课")
+        self.store.create(date="2026-08-02", amount=20, description="100% cotton")
+        self.store.create(date="2026-08-03", amount=30, description="a_b test")
+        self.assertEqual(
+            [e.description for e in self.store.find("%")], ["100% cotton"]
+        )
+        self.assertEqual([e.description for e in self.store.find("_")], ["a_b test"])
+        self.assertEqual(self.store.find("\\"), [])
+        # the ordinary case must keep working
+        self.assertEqual(len(self.store.find("足球")), 1)
+
+    # §4 — a bare KeyError reached MCP callers as just the id
+    def test_missing_expense_raises_a_coaching_error(self):
+        for call in (
+            lambda: self.store.update("nope", fields={"amount": 5}),
+            lambda: self.store.mark_paid("nope", paid=True, paid_date="2026-08-01"),
+        ):
+            with self.assertRaises(KeyError) as ctx:  # api.py maps KeyError → 404
+                call()
+            message = str(ctx.exception)
+            self.assertIn("nope", message)
+            self.assertIn("query", message, "error must name the way to retry")
+            self.assertNotEqual(message, repr("nope"), "bare KeyError repr leaked")
+
+    # §4 — expenses_add(paid=True) spanned two transactions
+    def test_creating_an_already_paid_expense_is_one_transaction(self):
+        exp = self.store.create(
+            date="2026-08-01", amount=300, description="足球课",
+            paid=True, paid_date="2026-08-02", submitted_by="Wei",
+        )
+        self.assertTrue(exp.paid)
+        self.assertEqual(exp.paid_date, "2026-08-02")
+        history = self.store.history(exp.id)
+        self.assertEqual([h.action for h in history], ["create"])
+        self.assertTrue(history[0].snapshot["paid"])
+
+    def test_created_paid_without_a_date_defaults_to_the_due_date(self):
+        exp = self.store.create(date="2026-08-01", amount=5, paid=True)
+        self.assertEqual(exp.paid_date, "2026-08-01")
+
+    # §4 — expense_history.seq had no uniqueness constraint
+    def test_history_seq_is_unique_per_expense(self):
+        exp = self.store.create(date="2026-08-01", amount=10)
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.db.tx() as tx:
+                tx.execute(
+                    "INSERT INTO expense_history "
+                    "(id, expense_id, seq, action, changed_by, changed_at, snapshot) "
+                    "VALUES ('dup', :eid, 0, 'update', NULL, '2026-08-01T00:00:00', '{}')",
+                    {"eid": exp.id},
+                )
+
+    # §3 — currencies were summed without conversion
+    def test_non_cny_currency_is_rejected(self):
+        with self.assertRaises(ValidationError) as ctx:
+            self.store.create(date="2026-08-01", amount=10, currency="USD")
+        self.assertIn("CNY", str(ctx.exception))
+        exp = self.store.create(date="2026-08-01", amount=10)
+        with self.assertRaises(ValidationError):
+            self.store.update(exp.id, fields={"currency": "usd"})
+
+    def test_editing_other_fields_never_trips_the_currency_guard(self):
+        exp = self.store.create(date="2026-08-01", amount=10, description="x")
+        self.assertEqual(
+            self.store.update(exp.id, fields={"description": "y"}).currency, "CNY"
+        )
+        self.assertEqual(self.store.update(exp.id, fields={"currency": "cny"}).currency, "CNY")
+
+    # §4 — APP_TZ was unpinned by any test
+    def test_today_str_follows_app_tz(self):
+        """Every date assertion elsewhere is a shape-only regex, so a silent
+        fallback to UTC — an image without tzdata — passed the whole suite.
+        These two zones are 25 hours apart: they can never share a date."""
+        import os
+
+        from app.store import today_str
+
+        original = os.environ.get("APP_TZ")
+        try:
+            os.environ["APP_TZ"] = "Pacific/Kiritimati"   # UTC+14
+            east = today_str()
+            os.environ["APP_TZ"] = "Pacific/Niue"         # UTC-11
+            west = today_str()
+        finally:
+            if original is None:
+                os.environ.pop("APP_TZ", None)
+            else:
+                os.environ["APP_TZ"] = original
+        self.assertNotEqual(east, west, "APP_TZ is being ignored")
+
+    def test_the_households_timezone_data_ships_with_the_image(self):
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo("Asia/Shanghai")  # raises if tzdata is missing
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -312,5 +312,113 @@ class DocumentedCountsTests(unittest.TestCase):
         self.assertIn(f"{actual} tools", claude_md)
 
 
+class ServerDecidesTodayTests(unittest.TestCase):
+    """docs/BACKLOG.md §2 — the portal read the device clock for every date
+    decision while the server used APP_TZ, so the two could disagree."""
+
+    def setUp(self):
+        self.client, self.store, self.token = make_client()
+        self.portal = (
+            Path(__file__).resolve().parent.parent / "app" / "portal.html"
+        ).read_text(encoding="utf-8")
+
+    def test_list_response_carries_the_households_today(self):
+        from app.store import today_str
+
+        r = self.client.post("/api/list", json={"token": self.token})
+        self.assertEqual(r.json()["today"], today_str())
+
+    def test_list_today_follows_app_tz_not_the_server_clock(self):
+        import os
+
+        original = os.environ.get("APP_TZ")
+        try:
+            os.environ["APP_TZ"] = "Pacific/Kiritimati"
+            east = self.client.post("/api/list", json={"token": self.token}).json()["today"]
+            os.environ["APP_TZ"] = "Pacific/Niue"
+            west = self.client.post("/api/list", json={"token": self.token}).json()["today"]
+        finally:
+            if original is None:
+                os.environ.pop("APP_TZ", None)
+            else:
+                os.environ["APP_TZ"] = original
+        self.assertNotEqual(east, west)
+
+    def test_portal_prefers_the_server_date_over_the_device(self):
+        self.assertIn("if (serverToday) return serverToday;", self.portal)
+        self.assertIn("serverToday = j.today;", self.portal)
+        # only one `new Date()` may survive — the first-paint fallback inside
+        # todayStr(); every other date decision must route through todayStr()
+        self.assertEqual(
+            self.portal.count("new Date()"), 1,
+            "a date decision is still reading the phone's clock directly",
+        )
+
+
+class HandlersRunOffTheEventLoopTests(unittest.TestCase):
+    """docs/BACKLOG.md §4 — every API handler is synchronous and hits the
+    database; awaiting them inline blocked the loop for the whole round trip
+    to Neon, so one slow query stalled every other request in the process."""
+
+    def test_blocking_store_calls_are_dispatched_to_a_thread(self):
+        src = (
+            Path(__file__).resolve().parent.parent / "app" / "web.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("await run_in_threadpool(handler, store, body)", src)
+        self.assertIn("await run_in_threadpool(store.validate_token, token)", src)
+        self.assertNotIn("status, payload = handler(store, body)", src)
+
+    def test_the_api_still_works_through_the_threadpool(self):
+        client, store, token = make_client()
+        r = client.post("/api/submit", json={
+            "token": token, "date": "2026-08-01", "amount": 42, "description": "水电",
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+        listed = client.post("/api/list", json={"token": token}).json()
+        self.assertEqual(len(listed["expenses"]), 1)
+        self.assertEqual(listed["summary"]["unpaid"], 42.0)
+
+
+class ConstraintHardeningTests(unittest.TestCase):
+    """docs/BACKLOG.md §4 — the seq uniqueness constraint must apply, but must
+    never be able to stop a live portal from starting."""
+
+    def test_constraint_applies_on_a_fresh_database(self):
+        from app.db import Database
+
+        db = Database("sqlite:///:memory:")
+        db.init()
+        self.assertEqual(db._apply_hardening(), [], "constraint failed to apply")
+
+    def test_unappliable_constraint_degrades_to_a_warning(self):
+        """Data that already violates it must not take the service down."""
+        import io
+        from contextlib import redirect_stderr
+
+        from app.db import Database
+        from app.store import Store
+
+        db = Database("sqlite:///:memory:")
+        db.init()
+        store = Store(db)
+        exp = store.create(date="2026-08-01", amount=10)
+        # forge the duplicate the constraint exists to prevent, behind its back
+        with db.tx() as tx:
+            tx.execute("DROP INDEX uq_expense_history_expense_seq")
+            tx.execute(
+                "INSERT INTO expense_history "
+                "(id, expense_id, seq, action, changed_by, changed_at, snapshot) "
+                "VALUES ('dup', :eid, 0, 'update', NULL, '2026-08-01T00:00:00', '{}')",
+                {"eid": exp.id},
+            )
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            failed = db._apply_hardening()
+        self.assertEqual(len(failed), 1)
+        self.assertIn("WARNING", buf.getvalue())
+        # and the app still serves
+        self.assertEqual(len(store.list()), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

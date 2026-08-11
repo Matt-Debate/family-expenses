@@ -308,12 +308,20 @@ class AgentErgonomicsTests(unittest.TestCase):
         self.assertEqual(added["amount"], 300.0)
 
     def test_add_already_paid_in_one_call(self):
+        """One call, and now one transaction: the row is inserted already paid.
+
+        It used to insert then mark_paid, leaving two history rows and a window
+        where a failed second write reported an error over a row that was in
+        fact saved (unpaid). One 'create' entry describing the paid row is both
+        atomic and a truer account of what happened.
+        """
         added = self.call("expenses_add", amount="300", description="足球课",
                           paid=True, submitted_by="Wei")
         self.assertTrue(added["paid"])
         self.assertRegex(added["paid_date"], r"^\d{4}-\d{2}-\d{2}$")
         hist = self.call("expenses_history", expense_id=added["id"])
-        self.assertEqual([h["action"] for h in hist["history"]], ["create", "mark_paid"])
+        self.assertEqual([h["action"] for h in hist["history"]], ["create"])
+        self.assertTrue(hist["history"][0]["snapshot"]["paid"])
 
     def test_write_results_carry_unpaid_total_note(self):
         added = self.call("expenses_add", amount="300", description="足球课")

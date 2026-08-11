@@ -26,6 +26,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 _SCHEMA_PATH = Path(__file__).resolve().parent.parent / "db" / "schema.sql"
+_HARDENING_PATH = _SCHEMA_PATH.parent / "hardening.sql"
 
 # :name → %(name)s. Negative lookbehind guards ``::`` casts (none in our SQL,
 # but cheap insurance).
@@ -163,6 +164,48 @@ class Database:
             except BaseException:
                 conn.rollback()
                 raise
+        self._apply_hardening()
+
+    def _apply_hardening(self, path: Path | str = _HARDENING_PATH) -> list[str]:
+        """Apply db/hardening.sql best-effort; return the statements that failed.
+
+        These constraints can legitimately fail against pre-existing data. This
+        is a live portal one family member depends on, so a constraint that
+        cannot be applied is a warning in the logs — never a service that
+        refuses to start. Each statement gets its own transaction so one
+        failure does not roll back the others.
+        """
+        path = Path(path)
+        if not path.exists():
+            return []
+        failed: list[str] = []
+        for statement in _sql_statements(path.read_text(encoding="utf-8")):
+            try:
+                with self.tx() as tx:
+                    tx.execute(statement)
+            except Exception as exc:
+                import sys
+
+                failed.append(statement)
+                print(
+                    f"WARNING: could not apply constraint ({exc}); "
+                    f"statement: {' '.join(statement.split())[:120]}",
+                    file=sys.stderr,
+                )
+        return failed
+
+
+def _sql_statements(script: str) -> list[str]:
+    """Split a comment-annotated DDL script into individual statements.
+
+    Deliberately naive — it only has to handle db/hardening.sql, which is
+    CREATE INDEX statements and `--` comments. No string literals, no
+    semicolons inside identifiers.
+    """
+    stripped = "\n".join(
+        line for line in script.splitlines() if not line.lstrip().startswith("--")
+    )
+    return [s.strip() for s in stripped.split(";") if s.strip()]
 
 
 def _is_pg_connection_error(exc: BaseException) -> bool:

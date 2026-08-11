@@ -226,15 +226,14 @@ def build_mcp(store: Store) -> FastMCP:
         say it's ALREADY paid ('昨天交了...'), pass paid=true (paid_date
         defaults to today). To change an EXISTING expense use expenses_update;
         to pay one off use expenses_mark_paid. category: use an exact key from expenses_help — and for money someone fronted and is owed back, category='borrow' (never a synonym)."""
+        # one transaction, even when it arrives already paid: this used to
+        # create the row and then mark it paid separately, and a failure in
+        # between left the expense unpaid while the tool reported an error
         expense = store.create(
             date=date or today_str(), amount=amount, description=description,
             category=category, submitted_by=submitted_by,
+            paid=paid, paid_date=(paid_date or today_str()) if paid else None,
         )
-        if paid:
-            expense = store.mark_paid(
-                expense.id, paid=True, paid_date=paid_date or today_str(),
-                changed_by=submitted_by,
-            )
         result = expense.to_dict()
         result["note"] = _summary_note() + _category_note(category)
         return result
