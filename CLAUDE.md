@@ -18,6 +18,7 @@ money, and a wrong total is the most damaging defect available here.
 | Deploying, minting links, Auth0, rotating anything | `docs/RUNBOOK.md` |
 | Changing behavior a user can see | `docs/FEATURE_CONTRACT.md` §5.1 + A8 |
 | "Is this a known problem?" | `docs/BACKLOG.md` — check before reporting a discovery |
+| Reviewing, fixing, or testing anything | `docs/LESSONS.md` — what has actually broken here and the rule each failure produced. The policies below are the short form; that file is the evidence |
 | "What changed / what's live?" | `docs/CHANGELOG.md`, then `git log` |
 | How it first shipped | `docs/FIRST_DEPLOY_PLAN.md` (historical record) |
 
@@ -25,6 +26,13 @@ Do not reconstruct current state from this file — it will be stale. The change
 and `git log` are authoritative.
 
 ## Policies
+
+Each of these came from a specific failure. `docs/LESSONS.md` records what
+happened in each case — read it before a review or a fix wave, because a rule
+you know the origin of transfers to cases it does not literally name. The two
+that cost the most: **a fix is not a verified state** (five of six fix waves in
+v0.10.1 introduced a defect of their own), and **a test stub more permissive
+than the real object cannot fail**.
 
 **P1 — The compatibility contract outranks every other consideration.**
 `docs/FEATURE_CONTRACT.md` §5.1 / A8: no change may force her to reconnect,
@@ -83,8 +91,13 @@ here match reality.
 
 **P8 — Tests are the guardrail, and must stay free of external services.**
 The suite runs on sqlite with no DB server, no network, no cloud. Anything
-touching money is worth a cross-model pass (`/codex-verify`) — one such review
-found six real defects that had all passed a 117-test suite.
+touching money gets a cross-model pass (`/codex-verify`) as a **distinct gate,
+not a further round of the same review** — a same-model reviewer inherits the
+framing of the code it is reading. One such review found six real defects that
+had all passed a 117-test suite; another found the only money-moving defect in
+v0.10.1 after three same-model rounds had read the same lines
+(`docs/LESSONS.md` §2). Review does not stop until **no must-fix and no
+should-fix remains**, re-checked after the last change.
 
 **P9 — Never print a portal token, database URI, or client secret** into a
 transcript, a commit, or a doc. Pipe secrets straight into env vars
@@ -93,7 +106,7 @@ transcript, a commit, or a doc. Pipe secrets straight into env vars
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 332 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 333 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 PORTAL_DEV_RELOAD=1 python3 -m app.main   # …and re-read portal.html per request
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link
@@ -113,7 +126,7 @@ scripts/deploy.sh --dry-run               # inspect; drop the flag to deploy
 | `app/main.py` | one service: portal + API + `/mcp`; env `DATABASE_URL`, `APP_TZ`, `MCP_SECRET` (leave unset), `PORT`, `PORTAL_DEV_RELOAD` |
 | `db/schema.sql` | portable DDL, applied idempotently at startup; **first breaking change must start dated migration files** |
 | `db/hardening.sql` | constraints applied **best-effort** at startup — they can fail against existing data, and a live portal must still boot; failures log a warning |
-| `docs/` | contract · MCP design · runbook · changelog · backlog · first-deploy record |
+| `docs/` | contract · MCP design · runbook · changelog · backlog · **lessons (failure → rule)** · first-deploy record |
 
 Development branch: `claude/family-expenses-setup-8uvrks` (kept in lockstep with
 `main`).

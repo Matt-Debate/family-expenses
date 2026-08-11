@@ -329,6 +329,26 @@ class DocumentedCountsTests(unittest.TestCase):
             for p in sorted((self.ROOT / "tests").glob("test_*.py"))
         )
 
+    def test_the_lessons_file_exists_and_is_pointed_at(self):
+        """`docs/LESSONS.md` is where a failure gets turned into a rule, and it
+        only works if a session reads it. A pointer that rots is a file nobody
+        opens — and the whole reason it exists is that the next session starts
+        with no memory of what broke here.
+        """
+        lessons = self.ROOT / "docs" / "LESSONS.md"
+        self.assertTrue(lessons.exists(), "docs/LESSONS.md is gone")
+        body = lessons.read_text(encoding="utf-8")
+        self.assertGreater(len(body), 2000, "LESSONS.md has been emptied")
+        claude = (self.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("docs/LESSONS.md", claude,
+                      "CLAUDE.md no longer points at the lessons file")
+        # every entry must carry the failure as well as the rule; a file of
+        # bare rules is what CLAUDE.md already is
+        self.assertIn("**What happened.**", body)
+        self.assertIn("**Rule.**", body)
+        self.assertEqual(body.count("**What happened.**"), body.count("**Rule.**"),
+                         "an entry states a rule with no failure behind it, or vice versa")
+
     def test_documented_test_count_matches_reality(self):
         actual = self.actual_test_count()
         for name in self.LIVING:
