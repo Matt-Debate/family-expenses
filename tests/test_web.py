@@ -607,6 +607,36 @@ class ClassTrackerApiTests(unittest.TestCase):
         self.assertEqual(self.post("classes-delete", id=pid).status_code, 200)
         self.assertEqual(self.post("classes-list").json()["packages"], [])
 
+    def test_every_field_the_form_sends_survives_the_round_trip(self):
+        """The store pins these; the HTTP layer was trusted to pass them
+        through. Dropping `date`, `period_label` or `note` in app/api.py left
+        all 210 tests green while silently discarding what she typed."""
+        eid = self.a_payment()
+        pid = self.post("classes-add", expense_id=eid, name="足球课",
+                        kind="per_class", class_count=10,
+                        period_label="8月").json()["package"]["id"]
+        r = self.post("classes-log", package_id=pid, kind="missed_school",
+                      date="2026-08-05", note="下雨停课")
+        package = r.json()["package"]
+        self.assertEqual(package["period_label"], "8月")
+        self.assertEqual(package["name"], "足球课")
+        self.assertEqual(package["class_count"], 10)
+        event = package["events"][0]
+        self.assertEqual(event["date"], "2026-08-05")
+        self.assertEqual(event["note"], "下雨停课")
+        self.assertEqual(event["kind"], "missed_school")
+
+    def test_archiving_is_respected_at_the_http_boundary(self):
+        eid = self.a_payment()
+        pid = self.post("classes-add", expense_id=eid, name="足球课",
+                        kind="per_class", class_count=10).json()["package"]["id"]
+        self.post("classes-update", id=pid, fields={"archived": True})
+        self.assertEqual(self.post("classes-list").json()["packages"], [])
+        widened = self.post("classes-list", include_archived=True).json()
+        self.assertEqual([p["archived"] for p in widened["packages"]], [True])
+        # and the payment stays spoken for, so it is not offered again
+        self.assertNotIn(eid, [c["id"] for c in widened["candidates"]])
+
     def test_candidates_exclude_payments_already_tracked(self):
         tracked = self.a_payment(description="足球课")
         free = self.a_payment(amount=99, description="游泳课")
@@ -734,6 +764,127 @@ class ClassLineRenderingTests(unittest.TestCase):
         }})
         self.assertIn("cls_over", line["sub"])
 
+    def test_a_capped_period_row_says_that_it_is_capped(self):
+        """The counts are uncapped and the money is not, so '(5)' beside
+        ¥0.00 reads as a bug unless the row says why."""
+        line = self.cls_line({"kind": "period", "summary": {
+            "owed": 6, "owed_amount": 800.0, "rate": 400.0,
+            "reclaimable": 5, "reclaimable_amount": 800.0,
+            "forfeited": 1, "forfeited_amount": 0.0, "overrun": 4,
+        }})
+        self.assertIn("cls_capped", line["sub"])
+
+    def test_the_period_row_shows_three_distinct_figures(self):
+        """Earlier fixtures used rate == reclaimable == forfeited, so swapping
+        any one for another still passed every assertion."""
+        line = self.cls_line({"kind": "period", "summary": {
+            "owed": 3, "owed_amount": 1200.0, "rate": 400.0,
+            "reclaimable": 2, "reclaimable_amount": 800.0,
+            "forfeited": 1, "forfeited_amount": 100.0, "overrun": 0,
+        }})
+        self.assertIn("¥400.00", line["sub"])   # the rate, its own value
+        self.assertIn("¥800.00", line["sub"])   # reclaimable
+        self.assertIn("¥100.00", line["sub"])   # forfeited
+        self.assertIn("¥1200.00", line["amt"])  # the total, only in the total
+
+
+@unittest.skipUnless(shutil.which("node"), "node not available to run the portal's JS")
+class ClassTabInteractionTests(unittest.TestCase):
+    """Executes the Classes tab's click handler against a stub DOM.
+
+    Mutation testing found that inverting a single boolean in this handler
+    makes the entire tab inert — no buttons, no class log, forever — while all
+    210 tests stayed green, because every portal guarantee here was a string
+    match. Same for the double-tap guard and the stale-response counter: the
+    tokens simply did not appear in the test suite.
+    """
+
+    PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
+
+    def run_handler(self, driver: str) -> dict:
+        """Run the real classesBody handler body with stubbed globals."""
+        import json
+
+        src = self.PORTAL.read_text(encoding="utf-8")
+        start = src.index('  $("classesBody").addEventListener("click", function (ev) {')
+        end = src.index("  // ---- init ----")
+        handler = src[start:end]
+        self.assertIn("openPkgs[id]", handler, "handler markers moved")
+        harness = """
+var openPkgs = {}, logged = [], rendered = 0, apiCalls = [];
+var PKG = "p1";
+function renderClasses() { rendered++; }
+function refreshClasses() { rendered++; }
+function toast() {}
+function t(k) { return k; }
+function todayStr() { return "2026-08-11"; }
+function prompt() { return "2026-08-05"; }
+function confirm() { return true; }
+function api(name, body) {
+  apiCalls.push({name: name, body: body});
+  return { then: function (f) { f({}); return this; },
+           catch: function () { return this; } };
+}
+var button = {disabled: false, getAttribute: function (a) {
+  return a === "data-c" ? this._c : null; }, _c: null};
+var itemEl = {getAttribute: function (a) { return a === "data-pkg" ? PKG : null; }};
+var $ = function () { return {addEventListener: function () {}}; };
+"""
+        # the handler is registered via $("classesBody").addEventListener —
+        # capture the callback instead of running it against a real DOM
+        harness += """
+var handlerFn = null;
+$ = function () { return {addEventListener: function (_e, fn) { handlerFn = fn; }}; };
+"""
+        script = (harness + handler
+                  + "\n" + driver
+                  + "\nconsole.log(JSON.stringify({openPkgs: openPkgs, "
+                    "rendered: rendered, apiCalls: apiCalls, "
+                    "disabled: button.disabled}));\n")
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    TAP_ROW = """
+var ev = {target: {closest: function (sel) {
+  if (sel === "[data-pkg]") return itemEl;
+  return null; }}, stopPropagation: function () {}};
+handlerFn(ev);
+"""
+
+    def test_tapping_a_row_opens_it(self):
+        """Inverting the open flag here left every course row with no buttons
+        and no class log, permanently."""
+        state = self.run_handler(self.TAP_ROW)
+        self.assertEqual(state["openPkgs"], {"p1": True})
+        self.assertGreaterEqual(state["rendered"], 1)
+
+    def test_tapping_an_open_row_closes_it(self):
+        state = self.run_handler(self.TAP_ROW + self.TAP_ROW)
+        self.assertEqual(state["openPkgs"], {"p1": False})
+
+    def test_a_double_tapped_log_button_only_logs_once(self):
+        """One thumb, a laggy connection — on a period package each spurious
+        tap claims another class back from the school."""
+        driver = """
+button._c = "attended";
+var ev = {target: {closest: function (sel) {
+  if (sel === "[data-pkg]") return itemEl;
+  if (sel === "button[data-c]") return button;
+  return null; }}, stopPropagation: function () {}};
+handlerFn(ev);
+var before = apiCalls.length;
+button.disabled = true;          // as the first call left it, mid-flight
+handlerFn(ev);
+console.error("second call added " + (apiCalls.length - before));
+"""
+        state = self.run_handler(driver)
+        self.assertEqual(len(state["apiCalls"]), 1,
+                         "the in-flight guard did not stop the second tap")
+        self.assertEqual(state["apiCalls"][0]["name"], "classes-log")
+        self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-08-05")
+
 
 class ClassKindParityTests(unittest.TestCase):
     """The portal hard-codes the kind strings the store validates against.
@@ -846,8 +997,11 @@ class ClassKindParityTests(unittest.TestCase):
                 # same shape as PortalEscapingTests, because `esc(x || y)` is
                 # safe and a naive `esc(x)` match does not recognise it
                 residue = line.replace(f"esc({expr}", "")
-                # a property read or truthiness guard is not an interpolation
-                residue = re.sub(re.escape(expr) + r"\s*(\?|\)|\.|,|;|=|$)", "", residue)
+                # a property read, a truthiness guard or an object-key lookup
+                # (`openPkgs[p.id]`) is not an interpolation into HTML
+                residue = re.sub(
+                    re.escape(expr) + r"\s*(\?|\)|\]|\.|,|;|=|$)", "", residue
+                )
                 if expr in residue:
                     offenders.append(
                         f"  app/portal.html:{base + offset + 1}: {line.strip()}"

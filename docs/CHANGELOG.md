@@ -93,6 +93,52 @@ fixed, and every one of those mutations is now caught.
   class back from the school).
 - `/api/classes-list` read the whole package list twice to collect one column.
 
+### Fixed after the second review round
+The fix wave above was itself reviewed — and had introduced a defect of its own,
+the third time in this release that a fix wave did. A parallel mutation run
+applied 80 mutations and found **41 that the 210-test suite let through**, each
+with a probe proving it produced a genuinely wrong number.
+
+- **Deriving a total from two rounded parts let a period package report owing
+  back ¥0.01 MORE than was paid**, in ~0.8% of ordinary splits — the exact cap
+  the previous round's own contract text promised. The rule is now one-way and
+  stated as such: **a part is derived from the total, never the total from its
+  parts.** `owed_amount = value(school + ours)`, `forfeited_amount` is the
+  remainder, `remaining_amount = total - used_amount`. This also restores the
+  exact ratio (¥1,000 over 3 is ¥666.67 again, not ¥666.66).
+- **`ClassMoneyInvariantTests`** replaces hand-picked examples with a sweep over
+  18 hostile amounts × 9 counts × every event mix — ~3,000 combinations
+  asserting that parts sum to their total, nothing exceeds the payment, and
+  nothing is negative. Every money defect this feature has shipped survived a
+  suite of tidy examples (¥2,200/10 and ¥2,000/8 both divide evenly, so rounding
+  could never bite). This is the guard that actually holds.
+- **The school's share is now asserted directionally.** Flipping the allocation
+  to us-first keeps every total correct and reconciling while handing the school
+  back money she was going to claim — no invariant can see that.
+- **`class_count = NaN` returned a 500** rather than a 400: `int(nan)` raises a
+  bare `ValueError` outside the validator's own try.
+- **A foreign-key violation was reported as "already tracked"**, sending someone
+  to look for a package that does not exist. The diagnosis now runs after the
+  failed transaction has rolled back — a query inside an aborted Postgres
+  transaction is itself an error — and names the constraint that actually fired.
+- **A non-integrity failure was laundered into a reason.** A dropped connection
+  came back as "that payment is already tracked", so the agent stated it
+  confidently and the write was lost.
+- **Every course row collapsed after each log or unlog** — there was no
+  open-state, so the re-render closed the row the tap had just opened.
+- **A capped period row now says it is capped.** The counts report what happened
+  and the money stops at the payment, so "(5)" beside ¥0.00 read as a bug.
+- **`ClassTabInteractionTests`** runs the Classes tab's real click handler under
+  node. Inverting one boolean in it made the whole tab inert while 210 tests
+  stayed green, because every guarantee there was a string match.
+- The HTTP layer was trusted to pass its arguments through: `date`,
+  `period_label`, `note` and `include_archived` were all pinned at the store and
+  unpinned at the boundary, so dropping any of them changed nothing visible to
+  the suite.
+- Raw-SQL tests for the constraints the app makes unreachable — the `expenses`
+  foreign key, `class_count > 0`, and both kind allow-lists.
+- `PackageNotFoundError` landed in three call sites and only one was pinned.
+
 ### Changed
 - `classes_log` validates the event kind **before** resolving which course was
   meant — a bad kind is wrong whichever course it is, and reporting "no such

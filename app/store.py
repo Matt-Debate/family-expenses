@@ -15,7 +15,7 @@ import json
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from math import fsum
+from math import fsum, isfinite
 from typing import Any, Optional
 
 from .db import Database
@@ -121,6 +121,15 @@ _MISSED_EVENT_KINDS = ("missed_school", "missed_us")
 # category, which would silently drop uncategorised rows from every total.
 _NOT_BORROW = "COALESCE(category, '') <> 'borrow'"
 _IS_BORROW = "COALESCE(category, '') = 'borrow'"
+
+
+class _ConstraintLost(Exception):
+    """Internal: a class_packages constraint fired during INSERT.
+
+    Raised to unwind the failed transaction before working out WHICH one. The
+    diagnosis needs a query, and a query inside an aborted Postgres
+    transaction is itself an error — so it has to happen outside.
+    """
 
 
 def _is_integrity_error(exc: BaseException) -> bool:
@@ -567,8 +576,16 @@ class Store:
     @staticmethod
     def _validate_class_count(value: Any) -> int:
         # bool is an int subclass and 1.9 truncates to 1 — both would silently
-        # become a class count nobody typed, and the count divides the money
-        if isinstance(value, bool) or isinstance(value, float) and value != int(value):
+        # become a class count nobody typed, and the count divides the money.
+        # isfinite() comes first because int(nan) raises a bare ValueError that
+        # the API layer does not catch, turning a bad field into a 500.
+        if isinstance(value, bool):
+            raise ValidationError(
+                f"class_count {value!r} must be a whole number of classes, e.g. 10"
+            )
+        if isinstance(value, float) and (
+            not isfinite(value) or value != int(value)
+        ):
             raise ValidationError(
                 f"class_count {value!r} must be a whole number of classes, e.g. 10"
             )
@@ -625,12 +642,20 @@ class Store:
                 tally[event["kind"]] += 1
         missed = sum(tally[k] for k in _MISSED_EVENT_KINDS)
 
+        # THE RULE, and it is not symmetric: a part is always derived from the
+        # total, never the total from its parts. Summing two independently
+        # rounded halves can round UP twice — which let a period package report
+        # owing back ¥0.01 MORE than was ever paid, in ~0.8% of ordinary
+        # splits. value(count) == total, so anything valued at count-or-fewer
+        # classes is capped by construction.
+        total = round(amount, 2)
+
         def value(n: int) -> float:
             return round(amount * n / count, 2) if count else 0.0
 
         out: dict[str, Any] = {
             "class_count": count,
-            "amount": round(amount, 2),
+            "amount": total,
             "rate": round(amount / count, 2) if count else 0.0,
             "attended": tally["attended"],
             "missed_school": tally["missed_school"],
@@ -649,7 +674,9 @@ class Store:
                 "used": attended,
                 "used_amount": used_amount,
                 "remaining": max(0, count - attended),
-                "remaining_amount": round(amount - used_amount, 2),
+                # max(0, …) because _validate_amount does not round, so an
+                # amount carrying a third decimal could otherwise land on -0.0
+                "remaining_amount": max(0.0, round(total - used_amount, 2)),
                 # attending more classes than were bought is a real thing that
                 # happens; report it rather than clamping it out of sight
                 "overrun": max(0, attended - count),
@@ -665,12 +692,16 @@ class Store:
             # excess lands on what we forfeited rather than inflating the
             # figure we would put in front of the school
             ours = min(tally["missed_us"], count - school)
+            # The same rule as above, applied to a three-way split: value the
+            # school's share, then take OURS as the remainder of the pair's
+            # exact value. Both reconcile with the total AND the total stays
+            # the exact ratio — summing two rounded halves did neither.
+            owed_amount = value(school + ours)
             reclaimable_amount = value(school)
-            forfeited_amount = value(ours)
+            forfeited_amount = round(owed_amount - reclaimable_amount, 2)
             out.update({
                 "owed": missed,
-                # derived from its own parts, so the split always reconciles
-                "owed_amount": round(reclaimable_amount + forfeited_amount, 2),
+                "owed_amount": owed_amount,
                 "reclaimable": tally["missed_school"],
                 "reclaimable_amount": reclaimable_amount,
                 "forfeited": tally["missed_us"],
@@ -706,6 +737,35 @@ class Store:
             )
         now = _utc_now_iso()
         package_id = generate_id()
+        try:
+            self._insert_package(
+                package_id, str(expense_id), name, kind, class_count,
+                period_label, now,
+            )
+        except _ConstraintLost:
+            # fresh transaction: say which constraint actually fired, rather
+            # than assuming "duplicate" and sending someone to look for a
+            # package that does not exist
+            with self.db.tx() as tx:
+                duplicate = self._duplicate_package(tx, str(expense_id))
+                still_there = self._fetch(tx, str(expense_id))
+            if duplicate is not None:
+                raise ValidationError(
+                    f"that payment is already tracked by the class package "
+                    f"{duplicate['name']!r} — one payment, one package, or the "
+                    "same money would be counted twice"
+                ) from None
+            if still_there is None:
+                raise NotFoundError(expense_id) from None
+            raise ValidationError(
+                "could not track that payment — the ledger changed while this "
+                "was being saved. Call classes_list and try again."
+            ) from None
+        return self.package(package_id)
+
+    def _insert_package(
+        self, package_id, expense_id, name, kind, class_count, period_label, now,
+    ) -> None:
         with self.db.tx() as tx:
             expense = self._fetch(tx, str(expense_id))
             if expense is None:
@@ -734,17 +794,12 @@ class Store:
             except Exception as exc:
                 # The check above is not atomic with this insert, and since
                 # v0.9.0 the API handlers run in a threadpool — so two taps on
-                # "Add a course" can both pass it and the UNIQUE index becomes
-                # the thing that fires. The constraint doing its job must not
-                # reach the caller as a 500 with a driver traceback.
+                # "Add a course" can both pass it and a constraint becomes the
+                # thing that fires. Doing its job must not reach the caller as
+                # a 500 with a driver traceback.
                 if not _is_integrity_error(exc):
                     raise
-                raise ValidationError(
-                    "that payment is already tracked by a class package — one "
-                    "payment, one package, or the same money would be counted "
-                    "twice. Call classes_list to see it."
-                ) from exc
-        return self.package(package_id)
+                raise _ConstraintLost from exc
 
     def package(self, package_id: str) -> dict[str, Any]:
         with self.db.tx() as tx:

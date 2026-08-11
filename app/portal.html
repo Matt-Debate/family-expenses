@@ -312,7 +312,7 @@
       cls_attend:"✓ 上了", cls_cancel:"停课", cls_skip:"没去",
       cls_none:"还没有课程", cls_no_payment:"先在「待付」里记下这笔付款",
       cls_confirm_del:"删除这个课程和它的上课记录？", cls_over:"超出",
-      cls_logged:"已记录", cls_sec:"课程", cls_of:"共",
+      cls_logged:"已记录", cls_capped:"超出上限", cls_sec:"课程", cls_of:"共",
       ev:{ attended:"上了", missed_school:"停课", missed_us:"没去" },
       sec_due:"待付 · 未来30天", sec_paid:"本月已付", sec_lent:"待还我",
       empty_due:"没有待付的", empty_paid:"本月还没有付款记录", empty_all:"还没有记录",
@@ -349,7 +349,7 @@
       cls_attend:"✓ Attended", cls_cancel:"Cancelled", cls_skip:"We skipped",
       cls_none:"No courses yet", cls_no_payment:"Record the payment on the Due tab first",
       cls_confirm_del:"Delete this course and its class log?", cls_over:"over",
-      cls_logged:"Logged", cls_sec:"Courses", cls_of:"of",
+      cls_logged:"Logged", cls_capped:"capped, over by", cls_sec:"Courses", cls_of:"of",
       ev:{ attended:"attended", missed_school:"cancelled", missed_us:"skipped" },
       sec_due:"Due · next 30 days", sec_paid:"Paid this month", sec_lent:"Owed to me",
       empty_due:"Nothing due", empty_paid:"No payments yet this month", empty_all:"Nothing yet",
@@ -381,6 +381,7 @@
   var expenses = [];
   var summary = {};
   var packages = [];    // class tracker, loaded by refreshClasses()
+  var openPkgs = {};     // which courses are expanded, across re-renders
   var candidates = [];  // payments not yet tracked by a package
 
   function t(key) { var v = STR[lang][key]; return typeof v === "string" ? v : key; }
@@ -938,7 +939,11 @@
       sub: t("cls_rate") + " " + money(s.rate) + " · " +
            t("cls_reclaim") + " " + money(s.reclaimable_amount) +
            " (" + s.reclaimable + ") · " +
-           t("cls_forfeit") + " " + money(s.forfeited_amount) + " (" + s.forfeited + ")",
+           t("cls_forfeit") + " " + money(s.forfeited_amount) + " (" + s.forfeited + ")" +
+           // the counts are honest about what happened; the money stops at
+           // what was paid. Without saying so, a "(2)" beside ¥0.00 reads as
+           // a bug rather than as a cap.
+           (s.overrun ? " · " + t("cls_capped") + " " + s.overrun : ""),
       amt: t("cls_owed") + " " + money(s.owed_amount),
       cls: s.owed > 0 ? "lend" : "paid",
     };
@@ -969,13 +974,15 @@
       packages.map(function (p) {
         var L = clsLine(p);
         var title = esc(p.name) + (p.period_label ? " · " + esc(p.period_label) : "");
-        return '<div class="item" data-pkg="' + esc(p.id) + '">' +
+        var isOpen = !!openPkgs[p.id];
+        return '<div class="item' + (isOpen ? " open" : "") + '" data-pkg="' +
+          esc(p.id) + '">' +
           '<div class="ex-hd"><div class="ex-txt">' +
             '<div class="ex-desc">' + title + ' <span class="st ' + L.cls + '">' +
               esc(L.big) + "</span></div>" +
             '<div class="ex-sub">' + esc(L.sub) + "</div>" +
           '</div><div class="ex-amt">' + esc(L.amt) + "</div></div>" +
-          '<div class="btns" hidden="">' +
+          '<div class="btns"' + (isOpen ? "" : ' hidden=""') + ">" +
             (p.kind === "per_class"
               ? '<button class="pay" data-c="attended">' + esc(t("cls_attend")) + "</button>"
               : "") +
@@ -983,7 +990,8 @@
             '<button data-c="missed_us">' + esc(t("cls_skip")) + "</button>" +
             '<button class="del" data-c="delpkg">' + esc(t("del")) + "</button>" +
           "</div>" +
-          '<div class="histbox" hidden="">' + clsEvents(p) + "</div>" +
+          '<div class="histbox"' + (isOpen ? "" : ' hidden=""') + ">" +
+            clsEvents(p) + "</div>" +
         "</div>";
       }).join("") + "</div>";
   }
@@ -1182,9 +1190,8 @@
 
     var b = ev.target.closest && ev.target.closest("button[data-c]");
     if (!b) {  // tapping the row opens its actions and its class log
-      var open = itemEl.classList.toggle("open");
-      itemEl.querySelector(".btns").hidden = !open;
-      itemEl.querySelector(".histbox").hidden = !open;
+      openPkgs[id] = !openPkgs[id];
+      renderClasses();
       return;
     }
     ev.stopPropagation();

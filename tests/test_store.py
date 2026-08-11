@@ -546,6 +546,171 @@ class BacklogRegressionTests(unittest.TestCase):
         self.assertIn("Not/AZone", buf.getvalue())
 
 
+class ClassMoneyInvariantTests(unittest.TestCase):
+    """A sweep, not examples.
+
+    Every money defect this feature has shipped survived a suite full of
+    hand-picked cases — ¥2,200/10 and ¥2,000/8 both divide evenly, so rounding
+    could never bite. Twice the fix for one rounding bug introduced another in
+    the opposite direction. These assert the INVARIANTS over thousands of
+    combinations instead, which is the only thing that has actually held.
+
+    Pure arithmetic on Store.summarize_package — no database, no fixtures.
+    """
+
+    # amounts chosen to be hostile: odd cents, half-cent boundaries, values
+    # that cannot be represented exactly in binary floating point
+    AMOUNTS = (
+        0.01, 0.07, 1.0, 9.99, 99.95, 100.0, 333.33, 999.99, 1000.0, 1000.01,
+        1234.57, 2000.0, 2200.01, 2727.46, 4238.31, 5000.05, 12345.67, 99999.99,
+    )
+    COUNTS = (1, 2, 3, 4, 5, 7, 8, 10, 12)
+
+    def summarize(self, kind, amount, count, attended=0, school=0, ours=0):
+        events = (
+            [{"kind": "attended"}] * attended
+            + [{"kind": "missed_school"}] * school
+            + [{"kind": "missed_us"}] * ours
+        )
+        return Store.summarize_package(
+            {"class_count": count, "kind": kind}, amount, events
+        )
+
+    def test_per_class_parts_always_sum_to_the_payment(self):
+        checked = 0
+        for amount in self.AMOUNTS:
+            for count in self.COUNTS:
+                for attended in range(0, count + 3):
+                    s = self.summarize("per_class", amount, count, attended=attended)
+                    total = s["amount"]
+                    with self.subTest(amount=amount, count=count, attended=attended):
+                        self.assertEqual(
+                            round(s["used_amount"] + s["remaining_amount"], 2), total
+                        )
+                        self.assertLessEqual(s["used_amount"], total)
+                        self.assertGreaterEqual(s["remaining_amount"], 0.0)
+                        self.assertGreaterEqual(s["used_amount"], 0.0)
+                    checked += 1
+        self.assertGreater(checked, 1000)
+
+    def test_period_split_always_reconciles_and_never_exceeds_the_payment(self):
+        """The regression that made this class necessary: summing two
+        independently rounded halves rounds up twice, so a package could report
+        owing back a cent MORE than was ever handed over."""
+        checked = 0
+        for amount in self.AMOUNTS:
+            for count in self.COUNTS:
+                for school in range(0, count + 2):
+                    for ours in range(0, count + 2 - school):
+                        s = self.summarize("period", amount, count,
+                                           school=school, ours=ours)
+                        total = s["amount"]
+                        with self.subTest(amount=amount, count=count,
+                                          school=school, ours=ours):
+                            self.assertEqual(
+                                round(s["reclaimable_amount"]
+                                      + s["forfeited_amount"], 2),
+                                s["owed_amount"],
+                                "the split must reconcile with its own total",
+                            )
+                            self.assertLessEqual(
+                                s["owed_amount"], total,
+                                "cannot be owed back more than was paid",
+                            )
+                            # each PART bounded too: deriving the total from
+                            # the parts can leave a correct total sitting over
+                            # two garbage halves — ¥2,000 reclaimable and
+                            # -¥1,200 forfeited still sum to ¥800
+                            for key in ("reclaimable_amount", "forfeited_amount"):
+                                self.assertGreaterEqual(s[key], 0.0, key)
+                                self.assertLessEqual(s[key], total, key)
+                        checked += 1
+        self.assertGreater(checked, 1000)
+
+    def test_the_owed_total_is_the_exact_ratio_while_it_fits(self):
+        """Reconciling must not cost accuracy: below the cap the total is still
+        amount x n / count, not a sum of rounded pieces."""
+        for amount in self.AMOUNTS:
+            for count in self.COUNTS:
+                for school in range(0, count + 1):
+                    for ours in range(0, count + 1 - school):
+                        s = self.summarize("period", amount, count,
+                                           school=school, ours=ours)
+                        with self.subTest(amount=amount, count=count,
+                                          school=school, ours=ours):
+                            self.assertEqual(
+                                s["owed_amount"],
+                                round(amount * (school + ours) / count, 2),
+                            )
+
+    def test_no_figure_is_ever_negative_or_a_negative_zero(self):
+        """An amount carrying a third decimal made `remaining_amount` -0.0,
+        which the portal hid (falsy) and the MCP printed as ¥-0.00."""
+        for amount in (1000.999, 0.005, 33.333, 1.0e-3):
+            for count in (1, 3, 7):
+                for kind, extra in (("per_class", {"attended": count}),
+                                    ("period", {"school": count})):
+                    s = self.summarize(kind, amount, count, **extra)
+                    with self.subTest(amount=amount, count=count, kind=kind):
+                        for key, val in s.items():
+                            if key.endswith("_amount") or key in ("amount", "rate"):
+                                self.assertGreaterEqual(val, 0.0, key)
+                                self.assertEqual(
+                                    val, abs(val), f"{key} is a negative zero"
+                                )
+
+    def test_the_school_is_charged_first_when_the_log_overruns(self):
+        """Attribution, not arithmetic. Flipping the allocation to us-first
+        keeps every total correct and reconciling — it just hands the school
+        back the money she was going to claim from them. No invariant can see
+        that, so it has to be asserted directionally."""
+        # ¥1,000 for 2 classes; 2 cancelled by them, 2 skipped by us
+        s = self.summarize("period", 1000.0, 2, school=2, ours=2)
+        self.assertEqual(s["owed_amount"], 1000.0)
+        self.assertEqual(s["reclaimable_amount"], 1000.0,
+                         "the school's share must be valued first and in full")
+        self.assertEqual(s["forfeited_amount"], 0.0,
+                         "the overrun must land on what we forfeited")
+        # and the other way round: when we are the overrun, the school's real
+        # share is still exactly its own
+        s = self.summarize("period", 1000.0, 2, school=1, ours=3)
+        self.assertEqual(s["reclaimable_amount"], 500.0)
+        self.assertEqual(s["forfeited_amount"], 500.0)
+
+    def test_the_counts_report_what_happened_even_when_the_money_is_capped(self):
+        """Money stops at the payment; the log does not. Capping the counts too
+        would quietly under-report how many classes the school cancelled."""
+        s = self.summarize("period", 800.0, 2, school=5, ours=1)
+        self.assertEqual(s["reclaimable"], 5)   # not min(5, 2)
+        self.assertEqual(s["forfeited"], 1)
+        self.assertEqual(s["owed"], 6)
+        self.assertEqual(s["reclaimable"] + s["forfeited"], s["owed"])
+        self.assertEqual(s["overrun"], 4)
+        self.assertEqual(s["owed_amount"], 800.0)   # capped
+
+    def test_per_class_money_is_the_exact_ratio_at_every_n(self):
+        """A rounded rate x n agrees with the exact ratio at n=1, which is the
+        only case the first test of this pinned."""
+        for amount, count in ((1000.0, 3), (2000.0, 7), (0.07, 3), (12345.67, 9)):
+            for used in range(0, count + 1):
+                s = self.summarize("per_class", amount, count, attended=used)
+                with self.subTest(amount=amount, count=count, used=used):
+                    self.assertEqual(
+                        s["used_amount"], round(amount * used / count, 2)
+                    )
+
+    def test_attendance_never_affects_a_period_package_s_money(self):
+        for amount in self.AMOUNTS[:6]:
+            for count in self.COUNTS[:5]:
+                bare = self.summarize("period", amount, count, school=1)
+                with_attendance = self.summarize(
+                    "period", amount, count, school=1, attended=count
+                )
+                with self.subTest(amount=amount, count=count):
+                    self.assertEqual(bare["owed_amount"],
+                                     with_attendance["owed_amount"])
+
+
 class ClassTrackerTests(unittest.TestCase):
     """The class tracker holds no money of its own — every figure is derived
     from the linked payment, so the ledger and the tracker cannot disagree."""
@@ -829,14 +994,46 @@ class ClassTrackerTests(unittest.TestCase):
         what fires. The caller must still get the coaching, not a 500 carrying
         a driver traceback. Simulated by blinding the pre-check, which is
         exactly what a concurrent transaction does to it."""
-        expense, _package = self.pack()
-        self.store._duplicate_package = lambda tx, expense_id: None
+        expense, package = self.pack()
+        real = Store._duplicate_package
+        calls = []
+
+        def blind_once(tx, expense_id):
+            # invisible to the pre-check (as a concurrent uncommitted insert
+            # is), present by the time the constraint has fired and we ask why
+            calls.append(expense_id)
+            return None if len(calls) == 1 else real(tx, expense_id)
+
+        self.store._duplicate_package = blind_once
         with self.assertRaises(ValidationError) as ctx:
             self.store.create_package(
                 expense_id=expense.id, name="again", kind="per_class", class_count=5
             )
+        self.assertGreaterEqual(len(calls), 2, "the constraint path was not taken")
         self.assertIn("already tracked", str(ctx.exception))
-        self.assertIn("classes_list", str(ctx.exception))
+        self.assertIn(package["name"], str(ctx.exception))
+
+    def test_a_vanished_payment_is_not_reported_as_a_duplicate(self):
+        """The constraint that fires might be the foreign key, not UNIQUE.
+        Saying 'already tracked' then sends someone looking for a package that
+        does not exist."""
+        expense = self.store.create(date="2026-08-03", amount=100)
+        real_fetch = self.store._fetch
+
+        def vanish(tx, expense_id):
+            row = real_fetch(tx, expense_id)
+            self.store._fetch = real_fetch          # only for the pre-check
+            with self.store.db.tx() as other:
+                other.execute("DELETE FROM expenses WHERE id = :i", {"i": expense_id})
+            return row
+
+        self.store._fetch = vanish
+        with self.assertRaises(KeyError) as ctx:
+            self.store.create_package(
+                expense_id=expense.id, name="足球课", kind="per_class", class_count=5
+            )
+        self.assertIn("no expense with id", str(ctx.exception))
+        self.assertNotIn("already tracked", str(ctx.exception))
 
     def test_the_type_cannot_change_once_classes_are_logged(self):
         """Flipping kind silently reinterprets the whole log: attendances stop
@@ -871,6 +1068,106 @@ class ClassTrackerTests(unittest.TestCase):
             self.store.package("nope")
         self.assertIn("classes_list", str(ctx.exception))
         self.assertNotIn("expenses_list", str(ctx.exception))
+
+    def test_every_package_entry_point_says_where_package_ids_come_from(self):
+        """The fix landed in three call sites and only one was pinned."""
+        for call in (
+            lambda: self.store.package("nope"),
+            lambda: self.store.update_package("nope", fields={"name": "x"}),
+            lambda: self.store.log_class(package_id="nope", kind="attended"),
+        ):
+            with self.assertRaises(KeyError) as ctx:
+                call()
+            self.assertIn("classes_list", str(ctx.exception))
+            self.assertNotIn("expenses_list", str(ctx.exception))
+
+    def test_a_note_on_a_logged_class_is_kept(self):
+        """The reason a class was missed is what decides reclaimable versus
+        forfeited in an argument with the school."""
+        _expense, package = self.pack()
+        package = self.store.log_class(
+            package_id=package["id"], kind="missed_school", note="下雨停课"
+        )
+        self.assertEqual(package["events"][0]["note"], "下雨停课")
+
+    def test_a_malformed_class_date_is_refused(self):
+        _expense, package = self.pack()
+        with self.assertRaises(ValidationError):
+            self.store.log_class(
+                package_id=package["id"], kind="attended", date="tomorrow-ish"
+            )
+
+    def test_the_class_log_reads_newest_first(self):
+        _expense, package = self.pack()
+        for day in ("2026-08-05", "2026-08-19", "2026-08-12"):
+            package = self.store.log_class(
+                package_id=package["id"], kind="attended", date=day
+            )
+        self.assertEqual(
+            [e["date"] for e in package["events"]],
+            ["2026-08-19", "2026-08-12", "2026-08-05"],
+        )
+
+    def test_the_archived_flag_is_reported_not_just_acted_on(self):
+        """An agent asked 'which courses have I archived' reads the flag."""
+        _expense, package = self.pack()
+        self.store.update_package(package["id"], fields={"archived": True})
+        listed = self.store.list_packages(include_archived=True)
+        self.assertEqual([p["archived"] for p in listed], [True])
+
+    def test_an_archived_package_still_owns_its_payment(self):
+        """Otherwise the payment is offered again and the add fails on a
+        package she can no longer see."""
+        expense, package = self.pack()
+        self.store.update_package(package["id"], fields={"archived": True})
+        self.assertIn(expense.id, self.store.linked_expense_ids())
+
+    def test_a_non_integrity_failure_is_not_laundered_into_a_reason(self):
+        """Rewriting every insert failure as 'already tracked' turns a dropped
+        connection into a confident false statement, and the write is lost."""
+        expense = self.store.create(date="2026-08-03", amount=100)
+        boom = RuntimeError("connection reset by peer")
+
+        def explode(*_a, **_k):
+            raise boom
+
+        self.store._insert_package = explode
+        with self.assertRaises(RuntimeError) as ctx:
+            self.store.create_package(
+                expense_id=expense.id, name="足球课", kind="per_class", class_count=5
+            )
+        self.assertIs(ctx.exception, boom)
+
+    def test_the_database_refuses_to_orphan_a_package(self):
+        """The app-level guard makes this unreachable normally; the FK is the
+        backstop for the race where the check and the delete are not atomic."""
+        expense, _package = self.pack()
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.db.tx() as tx:
+                tx.execute("DELETE FROM expenses WHERE id = :i", {"i": expense.id})
+
+    def test_the_database_refuses_nonsense_a_bypass_could_write(self):
+        expense = self.store.create(date="2026-08-03", amount=100)
+        for values, why in (
+            ("('p1', :eid, 'x', 'per_class', 0, FALSE, 'n', 'n')", "class_count > 0"),
+            ("('p2', :eid, 'x', 'weekly', 1, FALSE, 'n', 'n')", "kind allow-list"),
+        ):
+            with self.subTest(why=why):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    with self.store.db.tx() as tx:
+                        tx.execute(
+                            "INSERT INTO class_packages (id, expense_id, name, "
+                            "kind, class_count, archived, created_at, updated_at) "
+                            f"VALUES {values}", {"eid": expense.id},
+                        )
+        _e, package = self.pack(label="9月")
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.store.db.tx() as tx:
+                tx.execute(
+                    "INSERT INTO class_events (id, package_id, date, kind, "
+                    "created_at) VALUES ('e1', :p, '2026-08-01', 'junk', 'n')",
+                    {"p": package["id"]},
+                )
 
     def test_archived_packages_are_hidden_unless_asked_for(self):
         _expense, package = self.pack()

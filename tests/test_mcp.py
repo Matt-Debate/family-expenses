@@ -382,6 +382,37 @@ class AgentErgonomicsTests(unittest.TestCase):
         self.assertEqual(len(result["candidates"]), 2)
         self.assertIn("package_id", result["candidates"][0])
 
+    def test_a_course_can_be_targeted_by_its_period(self):
+        """Two terms of the same course share a name — the month is the only
+        thing that tells them apart, so dropping it from the matcher leaves the
+        agent in an ambiguity loop it cannot exit."""
+        for month in ("8月", "9月"):
+            self.call("expenses_add", amount="1000", description=f"足球课 {month}")
+            self.call("classes_add", name="足球课", class_count=5,
+                      query=month, period_label=month)
+        result = self.call("classes_log", kind="attended", query="9月")
+        self.assertEqual(result["period_label"], "9月")
+
+    def test_an_archived_course_is_still_reachable_by_the_agent(self):
+        """classes_list hides it by default; that must not make it impossible
+        to correct a class logged against it."""
+        self.call("expenses_add", amount="1000", description="足球课")
+        package = self.call("classes_add", name="足球课", class_count=5, query="足球")
+        self.store.update_package(package["id"], fields={"archived": True})
+        logged = self.call("classes_log", kind="attended", query="足球")
+        self.assertEqual(logged["id"], package["id"])
+
+    def test_the_period_note_reports_both_counts_correctly(self):
+        self.call("expenses_add", amount="1000", description="游泳课")
+        package = self.call("classes_add", name="游泳课", class_count=10,
+                            kind="period", query="游泳")
+        self.call("classes_log", kind="missed_school", package_id=package["id"])
+        for _ in range(2):
+            note = self.call("classes_log", kind="missed_us",
+                             package_id=package["id"])["note"]
+        self.assertIn("1 cancelled by them", note)
+        self.assertIn("2 skipped by us", note)
+
     def test_class_tools_coach_when_the_payment_is_missing(self):
         from mcp.server.fastmcp.exceptions import ToolError
 
