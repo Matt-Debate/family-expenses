@@ -15,6 +15,7 @@ import json
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from math import fsum
 from typing import Any, Optional
 
 from .db import Database
@@ -280,6 +281,26 @@ class Store:
         since: Optional[str] = None, until: Optional[str] = None,
     ) -> list[Expense]:
         clauses, params = ["1 = 1"], {}
+        self._status_clause(status, clauses, params)
+        if since:
+            clauses.append("date >= :since")
+            params["since"] = self._validate_date(since, field="since")
+        if until:
+            clauses.append("date <= :until")
+            params["until"] = self._validate_date(until, field="until")
+        with self.db.tx() as tx:
+            rows = tx.query(
+                f"SELECT {_EXPENSE_COLS} FROM expenses WHERE {' AND '.join(clauses)} "
+                "ORDER BY date DESC, created_at DESC",
+                params,
+            )
+        return [self._row_to_expense(row) for row in rows]
+
+    @staticmethod
+    def _status_clause(status: Optional[str], clauses: list, params: dict) -> None:
+        """Shared by list() and find(). They previously each implemented this,
+        and drifted: find() silently treated 'overdue' — and any typo — as
+        'all', so a query search could return paid and future rows."""
         if status == "paid":
             clauses.append("paid = :paid")
             params["paid"] = True
@@ -296,19 +317,6 @@ class Store:
                 f"invalid status filter: {status!r} — use all, paid, unpaid, "
                 "or overdue (unpaid and past its due date)"
             )
-        if since:
-            clauses.append("date >= :since")
-            params["since"] = self._validate_date(since, field="since")
-        if until:
-            clauses.append("date <= :until")
-            params["until"] = self._validate_date(until, field="until")
-        with self.db.tx() as tx:
-            rows = tx.query(
-                f"SELECT {_EXPENSE_COLS} FROM expenses WHERE {' AND '.join(clauses)} "
-                "ORDER BY date DESC, created_at DESC",
-                params,
-            )
-        return [self._row_to_expense(row) for row in rows]
 
     def find(self, query: str, *, status: str = "all") -> list["Expense"]:
         """Case-insensitive substring match on description/category.
@@ -321,12 +329,7 @@ class Store:
             "(LOWER(COALESCE(description,'')) LIKE :q OR LOWER(COALESCE(category,'')) LIKE :q)"
         ]
         params: dict[str, Any] = {"q": needle}
-        if status == "paid":
-            clauses.append("paid = :paid")
-            params["paid"] = True
-        elif status == "unpaid":
-            clauses.append("paid = :paid")
-            params["paid"] = False
+        self._status_clause(status, clauses, params)
         with self.db.tx() as tx:
             rows = tx.query(
                 f"SELECT {_EXPENSE_COLS} FROM expenses WHERE {' AND '.join(clauses)} "
@@ -362,36 +365,39 @@ class Store:
             datetime.strptime(today, "%Y-%m-%d") + timedelta(days=cls.UPCOMING_WINDOW_DAYS)
         ).strftime("%Y-%m-%d")
 
-        out = {
-            "count": len(expenses),
-            "total": 0.0, "paid": 0.0, "unpaid": 0.0, "unpaid_count": 0,
-            "due_now": 0.0, "due_now_count": 0,
-            "upcoming": 0.0, "upcoming_count": 0,
-            "borrow_owed": 0.0, "borrow_owed_count": 0, "borrow_repaid": 0.0,
+        # collected per bucket, then fsum'd: plain += is order-dependent in
+        # binary floating point, so a large or extreme ledger could land a cent
+        # away from the SQL aggregate this replaced.
+        buckets: dict[str, list] = {
+            k: [] for k in ("total", "paid", "unpaid", "due_now", "upcoming",
+                            "borrow_owed", "borrow_repaid")
         }
+        counts = {k: 0 for k in ("unpaid_count", "due_now_count",
+                                 "upcoming_count", "borrow_owed_count")}
         for e in expenses:
             amount = float(e.amount or 0)
-            out["total"] += amount
+            buckets["total"].append(amount)
             if (e.category or "") == BORROW_CATEGORY:
                 if e.paid:
-                    out["borrow_repaid"] += amount
+                    buckets["borrow_repaid"].append(amount)
                 else:
-                    out["borrow_owed"] += amount
-                    out["borrow_owed_count"] += 1
+                    buckets["borrow_owed"].append(amount)
+                    counts["borrow_owed_count"] += 1
                 continue
             if e.paid:
-                out["paid"] += amount
+                buckets["paid"].append(amount)
                 continue
-            out["unpaid"] += amount
-            out["unpaid_count"] += 1
+            buckets["unpaid"].append(amount)
+            counts["unpaid_count"] += 1
             if e.date <= today:
-                out["due_now"] += amount
-                out["due_now_count"] += 1
+                buckets["due_now"].append(amount)
+                counts["due_now_count"] += 1
             elif e.date <= horizon:
-                out["upcoming"] += amount
-                out["upcoming_count"] += 1
-        for key, value in out.items():
-            out[key] = round(value, 2) if isinstance(value, float) else value
+                buckets["upcoming"].append(amount)
+                counts["upcoming_count"] += 1
+        out: dict[str, Any] = {"count": len(expenses)}
+        out.update({k: round(fsum(v), 2) for k, v in buckets.items()})
+        out.update(counts)
         return out
 
     def summary(self, *, today: Optional[str] = None) -> dict[str, Any]:

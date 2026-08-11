@@ -14,6 +14,45 @@ to a release entry when a chunk set ships.
   public URL, with cleanup. Production entrypoint (`python -m app.main` with
   $PORT) rehearsed in-session: health + portal routes OK.
 
+## [0.8.1] — 2026-08-11
+
+Six defects found by cross-model review (Codex/GPT-5.4) of 0.7.0–0.8.0. All six
+passed the 117-test suite; each now has a regression test.
+
+### Fixed
+- **The category guidance was factually backwards.** `_HELP` and the result note
+  told the agent an off-list category "will not appear in the totals or charts".
+  It does: `summarize()` counts every category except exact `borrow` as ordinary
+  household spending. The advice invited the very mis-bucketing it claimed to
+  prevent — a borrow-synonym inflates household paid/unpaid instead of the
+  money-owed-back figure. Both now say what actually happens.
+- **`find(status="overdue")` ignored the filter entirely.** `list()` and `find()`
+  each hand-rolled the status clause and drifted: `find()` handled only
+  paid/unpaid, so `expenses_list(query=…, status="overdue")` returned paid and
+  future rows, and a typo'd status silently meant "all". Extracted to a shared
+  `_status_clause()` so they cannot diverge again; unknown statuses now raise.
+- **Portal attribution was still client-spoofable.** `_author()` gave the
+  client's `submitted_by`/`changed_by` precedence over the link label, so a
+  request bearing the "wife" link could write any name into the audit trail —
+  contradicting 0.8.0's own claim. The validated link's label is now the only
+  author on this path.
+- **History could hide scheduled money.** A ledger holding only future rows
+  rendered "Nothing yet" and dropped every scheduled month; and `anyOut` was
+  computed from past/current rows only, so a settled history hid the Outstanding
+  column for scheduled rows that had money in it.
+- **`since`/`until` skipped validation when `query` was set** — the MCP
+  post-filter compared raw strings, so `since="not-a-date"` produced an
+  arbitrary slice instead of a coached error.
+- **Totals are now order-independent.** Bucket sums use `math.fsum` rather than
+  `+=`; binary floating-point addition is order-dependent, so the Python
+  aggregate is now identical to the SQL one it replaced for every input, not
+  just household-sized ones.
+
+### Tests
+- Suite 117 → **124**, including the +30/+31 upcoming boundary the first pass
+  never tested, `find(overdue)`, authoritative attribution, and order-independent
+  summation.
+
 ## [0.8.0] — 2026-08-11
 
 ### Fixed

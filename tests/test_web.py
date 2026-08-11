@@ -244,3 +244,35 @@ class CategoryParityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuthorIsAuthoritativeTests(unittest.TestCase):
+    """Cross-model review, finding 3: _author() gave the client's value
+    precedence, so a request bearing the 'wife' link could write any name into
+    the audit trail. The link's label is the only author now."""
+
+    def setUp(self):
+        self.client, self.store, self.token = make_client()
+
+    def test_client_cannot_choose_its_own_author(self):
+        r = self.client.post("/api/submit", json={
+            "token": self.token, "date": "2026-08-11", "amount": 10,
+            "submitted_by": "Mallory",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["expense"]["submitted_by"], "wife")
+
+    def test_edits_are_attributed_to_the_link_too(self):
+        eid = self.client.post("/api/submit", json={
+            "token": self.token, "date": "2026-08-11", "amount": 10,
+        }).json()["expense"]["id"]
+        self.client.post("/api/update", json={
+            "token": self.token, "id": eid, "changed_by": "Mallory",
+            "fields": {"amount": 20},
+        })
+        actions = [(h.action, h.changed_by) for h in self.store.history(eid)]
+        self.assertEqual(actions, [("create", "wife"), ("update", "wife")])
+
+    def test_link_label_never_leaks_into_a_response(self):
+        r = self.client.post("/api/list", json={"token": self.token})
+        self.assertNotIn("_link_label", r.text)

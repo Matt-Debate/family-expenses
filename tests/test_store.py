@@ -339,3 +339,45 @@ class SummaryMatchesTheRowsTests(unittest.TestCase):
         with self.assertRaises(ValidationError) as ctx:
             self.store.list(status="nope")
         self.assertIn("overdue", str(ctx.exception))
+
+
+class CodexVerifyRegressionTests(unittest.TestCase):
+    """Findings from the cross-model review of v0.8.0 — each one a real defect
+    the existing suite let through."""
+
+    def setUp(self):
+        self.store = make_store()
+
+    def test_find_honours_overdue_like_list_does(self):
+        """find() and list() each hand-rolled the status filter and drifted:
+        find() silently treated 'overdue' as 'all', so a query search could
+        return paid and future rows."""
+        old = self.store.create(date="2026-01-01", amount=10, description="tennis")
+        paid = self.store.create(date="2026-01-02", amount=20, description="tennis")
+        self.store.mark_paid(paid.id, paid=True, paid_date="2026-01-03")
+        self.store.create(date="2099-01-01", amount=30, description="tennis")
+        found = self.store.find("tennis", status="overdue")
+        self.assertEqual([e.id for e in found], [old.id])
+
+    def test_find_rejects_an_unknown_status_instead_of_ignoring_it(self):
+        with self.assertRaises(ValidationError):
+            self.store.find("anything", status="bogus")
+
+    def test_upcoming_horizon_boundary_is_exactly_30_days(self):
+        """The decisive case the first pass never tested: day 30 in, day 31 out."""
+        self.store.create(date="2026-08-30", amount=1, category="food")   # +30
+        self.store.create(date="2026-08-31", amount=2, category="food")   # +31
+        s = self.store.summary(today="2026-07-31")
+        self.assertEqual(s["upcoming"], 1.0)
+        self.assertEqual(s["upcoming_count"], 1)
+        self.assertEqual(s["unpaid"], 3.0)  # the +31 row is still owed, just not imminent
+
+    def test_totals_do_not_drift_with_row_order(self):
+        """Plain += is order-dependent in binary floating point; fsum is not."""
+        amounts = [0.1, 0.2, 1e9, 0.3, 1e-9, 4.44, 0.7]
+        for a in amounts:
+            self.store.create(date="2026-08-01", amount=a, category="food")
+        forward = self.store.summarize(self.store.list(), today="2026-08-11")
+        backward = self.store.summarize(list(reversed(self.store.list())), today="2026-08-11")
+        self.assertEqual(forward["unpaid"], backward["unpaid"])
+        self.assertEqual(forward["total"], backward["total"])

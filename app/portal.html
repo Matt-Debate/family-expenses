@@ -571,8 +571,14 @@
     // what is merely scheduled, soonest first, kept out of the way below
     var future = keys.filter(function (k) { return k > thisMonth; })
                      .map(function (k) { return by[k]; });
-    if (!rows.length) { $("historyBody").innerHTML = '<div class="empty">' + esc(t("empty_all")) + "</div>"; return; }
-    var anyOut = rows.some(function (r) { return r.out > 0; });
+    if (!rows.length && !future.length) {
+      $("historyBody").innerHTML = '<div class="empty">' + esc(t("empty_all")) + "</div>";
+      return;
+    }
+    // Finding 4b: computed over BOTH groups. Scoping it to past/current meant a
+    // fully-settled history hid the Outstanding column for the scheduled rows
+    // that actually had money in it.
+    var anyOut = rows.concat(future).some(function (r) { return r.out > 0; });
     var cols = anyOut ? 4 : 3;
 
     $("historyBody").innerHTML =
@@ -901,7 +907,6 @@
     }
   });
 
-  // ---- demo data (no token in URL: design preview only; real links always have /t/<token>) ----
   // ---- init ----
   $("date").value = todayStr();
   applyLang();

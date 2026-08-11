@@ -58,18 +58,20 @@ INTENT → TOOL:
 - "给我老婆做个链接" → expenses_mint_link(label="wife") — link never expires
 - "哪些链接还在用 / who has a link / list the links" → expenses_list_links
 
-CATEGORIES — pass one of these EXACT keys. Anything else still saves, but it
-will not group into the household's totals or charts, so avoid inventing one:
+CATEGORIES — prefer these EXACT keys. Anything else is accepted and counted as
+an ordinary household expense (and charted under whatever string you sent), so
+an invented key does not vanish — it just is not one of the household's buckets:
   living · aden-edu · aden-sports · aden-clothes · aden-other · food · home ·
   utilities · internet · mobile · transport · travel · entertainment ·
   clothes · medical · borrow · other
 
 - "borrow" is the ONE category with arithmetic behind it: it means she paid out
-  of her own pocket (or the company's) and is owed the money BACK. It is kept
-  out of every household expense total and reported on its own. Use it for
-  "垫付/她先付的/borrowed from her/she fronted it/I lent". Do NOT invent a
-  synonym like "loan repayment" or "reimbursement" — those silently fall out of
-  the borrow figures.
+  of her own pocket (or the company's) and is owed the money BACK. Only the
+  exact string "borrow" does this — it is kept out of every household expense
+  total and reported on its own. A synonym like "loan repayment" or
+  "reimbursement" is NOT recognised: it counts as ordinary household spending
+  and inflates the paid/unpaid totals instead. Use it for
+  "垫付/她先付的/borrowed from her/she fronted it/I lent".
 - "living" is the recurring monthly household payment (生活费).
 
 RULES OF THUMB:
@@ -95,16 +97,20 @@ def build_mcp(store: Store) -> FastMCP:
 
     # ── helpers ───────────────────────────────────────────────────────────
     def _category_note(category) -> str:
-        """Warn when a category will not group. Silent mis-bucketing is the
-        failure mode here: the row saves, the totals look fine, and the money
-        quietly lands where nobody looks."""
+        """Flag an off-list category.
+
+        Says what actually happens, not what would be tidier: the row counts as
+        an ordinary household expense. The dangerous case is a borrow-synonym,
+        which inflates household spending instead of the money-owed-back figure.
+        """
         text = (str(category).strip() if category else "")
         if not text or text in CATEGORY_KEYS:
             return ""
         return (
-            f" · NOTE: category {text!r} is not one of the household's keys, so "
-            "it will not appear in the totals or charts — call expenses_help for "
-            f"the list, and use {BORROW_CATEGORY!r} for money that must be paid back"
+            f" · NOTE: {text!r} is not one of the household's category keys, so "
+            "this counts as ordinary household spending. If it is money that "
+            f"must be paid back, use category={BORROW_CATEGORY!r} exactly — "
+            "no synonym is recognised. See expenses_help for the list."
         )
 
     def _summary_note() -> str:
@@ -170,6 +176,13 @@ def build_mcp(store: Store) -> FastMCP:
         .summary describes exactly the rows returned; when a filter is applied
         .ledger_total carries the whole-ledger figures for context."""
         if query and str(query).strip():
+            # validate before comparing: Store.list() validates these, and a
+            # malformed date must coach the caller rather than silently
+            # producing an arbitrary slice
+            if since:
+                since = store._validate_date(since, field="since")
+            if until:
+                until = store._validate_date(until, field="until")
             expenses = store.find(query, status=status)
             # find() has no date support; applying the range here keeps
             # since/until meaningful instead of silently ignored

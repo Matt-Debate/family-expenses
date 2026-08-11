@@ -32,8 +32,16 @@ def _authenticate(store: Store, body: dict) -> bool:
 
 
 def _author(body: dict, explicit_key: str) -> Any:
-    """An explicit name wins; otherwise fall back to the link's label."""
-    return body.get(explicit_key) or body.get(_LINK_LABEL)
+    """The validated link's label, authoritatively.
+
+    A client-supplied author is ignored outright. The portal form does not ask
+    for a name, so anything arriving in the body is either noise or a spoof —
+    a request bearing the "wife" link with submitted_by="Mallory" must not be
+    able to write "Mallory" into the audit trail. MCP callers do not pass
+    through here; they name the speaker via the store directly.
+    """
+    del explicit_key  # kept for call-site readability; deliberately unused
+    return body.get(_LINK_LABEL)
 
 
 def _err(status: int, message: str) -> tuple[int, dict]:
