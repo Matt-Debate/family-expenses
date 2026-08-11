@@ -224,8 +224,38 @@ It found three more blockers, two of them created by those fixes.
   of a DST change for any `APP_TZ` other than Shanghai. Both sides are converted
   to UTC first.
 
+### Fixed after the third cross-model round
+Two of these were created by the previous fix wave. The pattern held all the way
+down: five of six fix waves in this release introduced a defect of their own.
+
+- **The 30-second lock release was a worse bug than the deadlock it fixed.** It
+  is a blind retry: the request it gives up on may already have committed, and
+  `class_events` has no uniqueness constraint, so the retry writes a second row
+  and `summarize_package` counts both. **Removed** — a course whose request
+  never settles now stays locked until reload, which is visible and
+  recoverable. Filed as `BACKLOG.md` §6, with a standing instruction not to add
+  a timed unlock or automatic retry until the write is idempotent.
+- **Nothing repainted at midnight.** Removing the pin meant a re-render
+  corrects an untouched row — but a tab left visible across midnight never
+  re-renders. She taps ✓上了 at 00:05 on a box still reading yesterday, and the
+  box being the source of truth means yesterday is exactly what gets written.
+  A repaint is now scheduled for the household's midnight, which also moves the
+  Due tab's date default if she has not touched it.
+- **`/api/list` still read the clock twice for `status="overdue"`**: the
+  overdue filter inside `Store.list` called `today_str()` on its own, so a
+  request straddling midnight could drop a newly-overdue row from the rows AND
+  their totals while labelling the response the other day. The one reading is
+  threaded down now. The existing "read exactly once" test used `status="all"`,
+  which never enters that branch, so it could not prove its own claim.
+- The in-flight guard was a counter of `change` events, which cannot see a
+  re-pick of the value already displayed; it asks the box now — the same
+  question the tap asks.
+- The DST tests were taken at noon, *after* both transitions, so they passed
+  with the wall-clock arithmetic too. The pre-transition windows are the ones
+  that expose it, and both directions are covered now.
+
 ### Tests
-250 → 323, and two review rounds closed three long-standing coverage gaps:
+250 → 327, and two review rounds closed three long-standing coverage gaps:
 **BACKLOG §4 is closed** — both form-submit handlers now run under node, the
 class one (`addClsForm`) and the expense one (`addForm`, live since v0.1 and the
 one that writes money directly). All four mutations §4 named as surviving are
@@ -235,7 +265,7 @@ have a top-level key-parity guard (deleting an English key left the whole suite
 green, and the dialog then reads the literal key), and the whole-course delete
 confirm is driven by a test rather than only its endpoint.
 
-Eighty-four mutations were applied to the new code — the filter deleted,
+Ninety-one mutations were applied to the new code — the filter deleted,
 the category match made exact, the period box pinned open and pinned shut, the
 cleared field left populated, the picker ignored, a blank date posted as-is, the
 picker tap left toggling, the confirm removed, Cancel ignored, the remembered

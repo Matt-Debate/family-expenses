@@ -70,17 +70,20 @@ def _guard(handler):
 
 @_guard
 def api_list(store: Store, body: dict) -> tuple[int, dict]:
+    # read the clock ONCE, BEFORE the query: computing it separately for the
+    # rows, the summary and the response let a request straddling midnight
+    # bucket its rows against one day and label them with the next. The
+    # overdue filter inside store.list() reads it too, which is why `today` is
+    # passed down rather than left to default. The remaining-seconds figure
+    # comes from the same reading — yesterday's date beside a whole day left
+    # tells the page to hold yesterday for another day.
+    today, midnight_in = today_and_midnight()
     expenses = store.list(
         status=body.get("status") or "all",
         since=body.get("since"),
         until=body.get("until"),
+        today=today,
     )
-    # read the clock ONCE: computing it separately for the summary and for the
-    # response let a request straddling midnight bucket its rows against one
-    # day and label them with the next. The remaining-seconds figure has to
-    # come from that same reading — yesterday's date beside a whole day left
-    # tells the page to hold yesterday for another day.
-    today, midnight_in = today_and_midnight()
     return 200, {
         "ok": True,
         "expenses": [e.to_dict() for e in expenses],

@@ -458,6 +458,20 @@ class HouseholdMidnightTests(unittest.TestCase):
                 # transition happened before noon in each case
                 self.assertEqual(_seconds_until_midnight_from(now), expected)
 
+    def test_it_loses_the_hour_when_the_day_is_shorter(self):
+        """The pre-transition window is the only one that exposes wall-clock
+        arithmetic — the noon cases above sit AFTER the change and pass either
+        way. Spring forward: 23h30m on the clock, 22h30m of real time."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from app.store import _seconds_until_midnight_from
+
+        ny = ZoneInfo("America/New_York")
+        # 2026-03-08 00:30 EST, before the 02:00 spring-forward
+        now = datetime(2026, 3, 8, 0, 30, tzinfo=ny)
+        self.assertEqual(_seconds_until_midnight_from(now), 22 * 3600 + 1800)
+
     def test_it_counts_the_extra_hour_when_the_day_is_longer(self):
         """The transition AHEAD of the remaining window is where wall-clock
         arithmetic actually differs — 25 real hours read as 24."""

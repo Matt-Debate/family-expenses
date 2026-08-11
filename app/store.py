@@ -511,9 +511,15 @@ class Store:
     def list(
         self, *, status: str = "all",
         since: Optional[str] = None, until: Optional[str] = None,
+        today: Optional[str] = None,
     ) -> list[Expense]:
+        # `today` is threaded in so the caller's ONE clock reading decides both
+        # which rows are overdue and what date the response is labelled with.
+        # Read separately, a request straddling midnight dropped a newly-overdue
+        # row from the rows AND from their summarize() figures while reporting
+        # the other day.
         clauses, params = ["1 = 1"], {}
-        self._status_clause(status, clauses, params)
+        self._status_clause(status, clauses, params, today=today)
         if since:
             clauses.append("date >= :since")
             params["since"] = self._validate_date(since, field="since")
@@ -529,7 +535,10 @@ class Store:
         return [self._row_to_expense(row) for row in rows]
 
     @staticmethod
-    def _status_clause(status: Optional[str], clauses: list, params: dict) -> None:
+    def _status_clause(
+        status: Optional[str], clauses: list, params: dict,
+        today: Optional[str] = None,
+    ) -> None:
         """Shared by list() and find(). They previously each implemented this,
         and drifted: find() silently treated 'overdue' — and any typo — as
         'all', so a query search could return paid and future rows."""
@@ -543,7 +552,7 @@ class Store:
             clauses.append("paid = :paid")
             clauses.append("date < :today")
             params["paid"] = False
-            params["today"] = today_str()
+            params["today"] = today or today_str()
         elif status not in ("all", None, ""):
             raise ValidationError(
                 f"invalid status filter: {status!r} — use all, paid, unpaid, "

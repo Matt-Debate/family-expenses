@@ -151,7 +151,31 @@ pattern that caused those. It wants its own change and its own review round.
 searching by bucket is a legitimate read. Only the single-match *resolution*
 used by write tools needs the tier.
 
-## 6. Twelve live rows carry a category that is not a category
+## 6. `classes_log` has no idempotency, so a retry cannot be made safe
+
+**Filed 2026-08-11** by the third cross-model review of v0.10.1. Priority:
+medium — it bounds what the portal is allowed to do about a lost response.
+
+`class_events` has no uniqueness constraint (`db/schema.sql`), and
+`Store.log_class` inserts unconditionally. A request that commits server-side
+but whose response is lost therefore cannot be retried safely: the retry writes
+a second row, both are counted by `summarize_package`, and the money moves.
+
+**What this already cost.** v0.10.1 added a per-course in-flight lock, then a
+30-second timer to release it if a request never settled. The timer was a worse
+bug than the deadlock it fixed — it is precisely the blind retry described
+above. It was removed. A course whose request never settles now stays locked
+until the page is reloaded, which is visible (the buttons stay disabled) and
+recoverable, and that is the deliberate trade.
+
+**What a real fix looks like.** Either a client-generated event id carried on
+the request and made UNIQUE in the table, so a retry collapses onto the same
+row; or a reconciliation read (`classes_list`) before permitting the retry.
+The first is additive schema plus one column and is the better shape. Until one
+exists, **do not add any automatic retry or timed unlock to the class log** —
+that is the whole reason this entry is here.
+
+## 7. Twelve live rows carry a category that is not a category
 
 **Filed 2026-08-11** while building the v0.10.1 dropdown filter. Priority: low —
 no total is wrong — but it is invisible from inside the code.
@@ -172,7 +196,7 @@ accept free text and stop pretending the canonical list is closed. Do not
 "fix" it by making the store reject unknown categories — that would break the
 MCP's documented behaviour of accepting anything.
 
-## 7. Neon's restore window has never been recorded or rehearsed
+## 8. Neon's restore window has never been recorded or rehearsed
 
 **Filed 2026-08-11.** Priority: medium — this is the only item here that could
 cost real data.

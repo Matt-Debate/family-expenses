@@ -430,6 +430,32 @@ class ServerDecidesTodayTests(unittest.TestCase):
 
         del api_module, counting_today   # the old patch targets, now unused
 
+    def test_the_clock_is_read_once_for_an_OVERDUE_list_too(self):
+        """`status="all"` never enters the overdue branch, so the test above
+        cannot prove its own claim. `Store.list` read the clock again there,
+        and a request straddling midnight then dropped a newly-overdue row from
+        the rows AND their totals while labelling the response the other day.
+        """
+        from app import store as store_module
+
+        calls = []
+        from datetime import datetime, timezone
+
+        def counting_clock():
+            calls.append(1)
+            return datetime(2026, 8, 11, 23, 59, 59, tzinfo=timezone.utc)
+
+        real = store_module._household_now
+        store_module._household_now = counting_clock
+        try:
+            r = self.client.post("/api/list",
+                                 json={"token": self.token, "status": "overdue"})
+        finally:
+            store_module._household_now = real
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["today"], "2026-08-11")
+        self.assertEqual(len(calls), 1, f"clock read {len(calls)} times, expected 1")
+
     def test_the_response_says_how_much_of_today_is_left(self):
         """Without it the page rolls the date over 24h after the response
         instead of at midnight — a page opened at 23:50 offers yesterday all
@@ -488,6 +514,60 @@ class PortalDateArithmeticTests(unittest.TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         return out.stdout.strip()
+
+    def day_roll_fns(self) -> str:
+        """scheduleDayRoll + the date helpers it schedules against."""
+        src = self.PORTAL.read_text(encoding="utf-8")
+        start = src.index("  var dayTimer = null;")
+        end = src.index("  function daysBetween(")
+        block = src[start:end]
+        self.assertIn("function scheduleDayRoll()", block, "markers moved")
+        return block
+
+    def test_a_repaint_is_scheduled_for_the_household_midnight(self):
+        """renderClasses() recomputes an untouched picker's date — but only
+        when something calls it, and a tab left visible across midnight calls
+        nothing. She then taps ✓上了 at 00:05 on a box still reading yesterday,
+        and yesterday is what gets written. visibilitychange covers a phone; a
+        tablet left awake it does not.
+        """
+        script = """
+var serverToday = "2026-08-31", serverTodayAt = 1000000, resyncing = false;
+var serverMidnightIn = 600, scheduled = null, rendered = 0;
+var refresh = function () {};
+function render() { rendered++; }
+function $() { return {dataset: {}, value: ""}; }
+function clearTimeout() {}
+function setTimeout(fn, ms) { scheduled = ms; return 1; }
+Date.now = function () { return 1000000; };
+""" + self.day_roll_fns() + """
+scheduleDayRoll();
+console.log(JSON.stringify({scheduled: scheduled}));
+"""
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        # 600s to midnight, plus the one-second cushion past it
+        self.assertEqual(json.loads(out.stdout)["scheduled"], 601000)
+
+    def test_nothing_is_scheduled_before_the_server_has_spoken(self):
+        """Arming off a guessed date would repaint at the wrong moment."""
+        script = """
+var serverToday = null, serverTodayAt = 0, resyncing = false;
+var serverMidnightIn = null, scheduled = null;
+var refresh = function () {};
+function render() {}
+function $() { return {dataset: {}, value: ""}; }
+function clearTimeout() {}
+function setTimeout(fn, ms) { scheduled = ms; return 1; }
+""" + self.day_roll_fns() + """
+scheduleDayRoll();
+console.log(JSON.stringify({scheduled: scheduled}));
+"""
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIsNone(json.loads(out.stdout)["scheduled"])
 
     def test_the_date_rolls_over_at_midnight_not_24h_after_the_response(self):
         """The page loads at 23:50 and she logs a class ten minutes later. On
@@ -1101,6 +1181,10 @@ packages[1].id = "abcd22222222";
         titles = re.findall(r'<div class="ex-desc">(.*?)</div>', html)
         self.assertEqual(len(titles), 2, html)
         self.assertNotEqual(titles[0], titles[1], "a shared id prefix still collides")
+        # inequality alone would also pass for any two-character suffix; the
+        # guarantee is the WHOLE id, which is the handle the MCP falls back to
+        self.assertIn("abcd11111111", titles[0])
+        self.assertIn("abcd22222222", titles[1])
 
     def test_two_same_named_courses_do_not_render_identically(self):
         """The shape this release now produces exclusively: the portal stopped
@@ -1303,8 +1387,10 @@ class ClassTabInteractionTests(unittest.TestCase):
         self.assertIn("openPkgs[id]", handler, "handler markers moved")
         harness = """
 var openPkgs = {}, logged = [], rendered = 0, apiCalls = [];
-var clsDates = {};   // empty = she has not touched any picker
-var clsBusy = {}, clsPickSeq = {};
+// clsDates only carries a pick across a re-render; the BOX (dateEl) is what
+// the handler reads, so a driver states the date by setting dateEl.value
+var clsDates = {};
+var clsBusy = {};
 var timers = [];
 function setTimeout(fn, ms) { timers.push({fn: fn, ms: ms}); return timers.length; }
 function fireTimers() { var ts = timers; timers = []; ts.forEach(function (x) { x.fn(); }); }
@@ -1528,32 +1614,37 @@ clsDates["p2"] = "2026-07-09";
 pending = true;
 dateEl.value = "2026-07-02";
 """ + self.LOG_TAP + """
-// her next pick, while the first is still going — and deliberately the SAME
-// date, which a value-equality guard reads as "nothing has happened"
-dateEl.value = "2026-07-02";
-clsDates[PKG] = "2026-07-02";
-clsPickSeq[PKG] = (clsPickSeq[PKG] || 0) + 1;
+dateEl.value = "2026-07-09";   // her next pick, while the first is in flight
 resolveLog();
 """)
         self.assertEqual(state["apiCalls"][0]["body"]["date"], "2026-07-02")
-        self.assertEqual(state["picker"], "2026-07-02",
+        self.assertEqual(state["picker"], "2026-07-09",
                          "the in-flight log reset a date she picked after it")
-        self.assertEqual(state["clsDates"], {"p1": "2026-07-02"})
 
-    def test_a_request_that_never_comes_back_releases_the_course(self):
-        """A fetch that never settles calls neither .then nor .catch, so the
-        lock would hold that course for the life of the page — reload the only
-        way out, on the tab she uses from a phone behind the GFW."""
+    def test_the_reset_asks_the_box_not_an_event_counter(self):
+        """A counter of `change` events cannot see a re-pick of the value
+        already shown — `<input type="date">` fires nothing when the value does
+        not change. The box can: it is the same question the tap asks."""
+        state = self.run_handler("""
+pending = true;
+dateEl.value = "2026-07-02";
+""" + self.LOG_TAP + """
+dateEl.value = "2026-07-09";   // changed with no event of any kind
+resolveLog();
+""")
+        self.assertEqual(state["picker"], "2026-07-09")
+
+    def test_nothing_on_a_timer_releases_the_lock(self):
+        """A 30s release was tried here and is a WORSE bug than the deadlock it
+        fixed: the request it gives up on may already have committed, so the
+        retry it permits writes a second class_events row — and both are
+        counted by summarize_package, which moves money. A course held until
+        reload is visible and recoverable; a duplicate class is neither.
+        """
         state = self.run_handler("pending = true;\n" + self.LOG_TAP
                                  + "fireTimers();\n" + self.LOG_TAP)
-        self.assertEqual(len(state["apiCalls"]), 2,
-                         "the course stayed locked after a dead request")
-
-    def test_the_lock_is_not_released_while_the_request_is_alive(self):
-        """The release is a backstop for a dead request, not a timer that
-        re-arms the button under a slow one."""
-        state = self.run_handler("pending = true;\n" + self.LOG_TAP + self.LOG_TAP)
-        self.assertEqual(len(state["apiCalls"]), 1)
+        self.assertEqual(len(state["apiCalls"]), 1,
+                         "a timer unlocked the course and allowed a retry")
         self.assertEqual(state["busy"], {"p1": True})
 
     def test_the_toast_says_which_date_was_logged(self):
@@ -1599,13 +1690,12 @@ handlerFn(ev);
         start = src.index("  // the picker's date outlives the re-render")
         block = src[start:src.index('  $("addClsForm")')]
         self.assertIn("clsDates[", block, "block markers moved")
-        script = ("var clsDates = {}, clsPickSeq = {}, handlerFn = null;\n"
+        script = ("var clsDates = {}, handlerFn = null;\n"
                   'function todayStr() { return "2026-08-11"; }\n'
                   'var $ = function () { return {addEventListener:'
                   " function (_e, fn) { handlerFn = fn; }}; };\n"
                   + block + "\n" + driver
-                  + "\nconsole.log(JSON.stringify("
-                    "{dates: clsDates, seq: clsPickSeq}));\n")
+                  + "\nconsole.log(JSON.stringify({dates: clsDates}));\n")
         out = subprocess.run(["node", "-e", script], capture_output=True,
                              text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
@@ -1621,7 +1711,6 @@ handlerFn({target: {closest: function (sel) {
   return null; }}});
 """)
         self.assertEqual(state["dates"], {"p1": "2026-07-02"})
-        self.assertEqual(state["seq"], {"p1": 1}, "the pick was not counted")
 
     def test_emptying_the_box_puts_today_back_in_it(self):
         """A cleared date input reads "". Storing that leaves the box blank

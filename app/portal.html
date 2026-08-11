@@ -402,9 +402,6 @@
   // which courses have a log request in flight. Outside the DOM on purpose:
   // a re-render replaces a disabled button with an enabled one.
   var clsBusy = {};
-  // bumped on every pick, so an in-flight log can tell "she has chosen since"
-  // from "the date merely looks the same" — changing away and back matters
-  var clsPickSeq = {};
   var candidates = [];  // payments not yet tracked by a package
 
   function t(key) { var v = STR[lang][key]; return typeof v === "string" ? v : key; }
@@ -438,6 +435,29 @@
     return d.getUTCFullYear() + "-" + String(d.getUTCMonth()+1).padStart(2,"0") +
       "-" + String(d.getUTCDate()).padStart(2,"0");
   }
+  var dayTimer = null;
+  function scheduleDayRoll() {
+    // Nothing else moves the page on to the new day while it simply sits
+    // there. renderClasses() recomputes an untouched picker's date, and the
+    // add form's default likewise — but only when something calls them, and a
+    // tab that stays visible across midnight calls nothing. She then taps ✓上了
+    // at 00:05 on a box that still reads yesterday, and yesterday is what gets
+    // written. visibilitychange covers a phone; a tablet left awake it does not.
+    if (dayTimer) { clearTimeout(dayTimer); dayTimer = null; }
+    if (!serverToday || serverMidnightIn === null) return;
+    var msLeft = (serverTodayAt + serverMidnightIn * 1000) - Date.now() + 1000;
+    // beyond the ±1-day extrapolation cap todayStr() refuses to guess anyway,
+    // and the refetch it triggers will re-arm this
+    if (msLeft > 86400000) return;
+    dayTimer = setTimeout(function () {
+      var d = todayStr();
+      var dateEl = $("date");
+      if (dateEl && !dateEl.dataset.touched) dateEl.value = d;
+      render();
+      scheduleDayRoll();
+    }, msLeft < 1000 ? 1000 : msLeft);
+  }
+
   function todayStr() {
     if (serverToday) {
       // Advance it by however long the page has been open. Pinning the
@@ -1040,13 +1060,12 @@
           // being asked to type "2026-08-05" into a prompt(); the picker also
           // gets to say 上课日期 rather than the 到期日 the prompt borrowed.
           //
-          // An OPEN row's date is pinned into clsDates here, so the value on
-          // screen and the value a tap posts are one variable rather than two
-          // evaluations of `clsDates[id] || todayStr()` at different moments.
-          // Without that they drift apart in three ways, all silent: across
-          // midnight the box shows yesterday while a tap posts today; and
-          // re-picking the date already displayed fires no `change` event at
-          // all, so her deliberate choice was never recorded.
+          // The box is the SOURCE OF TRUTH: the log handler posts whatever
+          // this input holds. Nothing is inferred from events, which is what
+          // makes a re-pick of the value already shown work — `<input
+          // type="date">` fires no `change` at all in that case. An earlier
+          // version pinned today into clsDates here instead and froze the row
+          // on the day it was opened.
           //
           // `for`/`id` rather than wrapping the input: `input { font:inherit }`
           // inside a `label { font-size:.75rem; font-weight:600 }` renders the
@@ -1147,6 +1166,7 @@
         // set with the date, always: a fresh date beside a stale remaining-
         // seconds would roll the day over at the wrong moment
         serverMidnightIn = typeof j.midnight_in === "number" ? j.midnight_in : null;
+        scheduleDayRoll();
         // the add form's date defaults to today; correct it if the phone was
         // a day out, but never overwrite a date she has already chosen
         var dateEl = $("date");
@@ -1266,7 +1286,8 @@
       packages = j.packages || [];
       candidates = j.candidates || [];
       if (j.today) { serverToday = j.today; serverTodayAt = Date.now();
-        serverMidnightIn = typeof j.midnight_in === "number" ? j.midnight_in : null; }
+        serverMidnightIn = typeof j.midnight_in === "number" ? j.midnight_in : null;
+        scheduleDayRoll(); }
       renderClasses();
     }).catch(function (e) { toast(e.message); });
   }
@@ -1284,9 +1305,7 @@
     // leaving "" to fall through to today at tap time — the box would then
     // read blank while the tap wrote a date.
     if (!dateEl.value) dateEl.value = todayStr();
-    var pkg = itemEl.getAttribute("data-pkg");
-    clsDates[pkg] = dateEl.value;
-    clsPickSeq[pkg] = (clsPickSeq[pkg] || 0) + 1;
+    clsDates[itemEl.getAttribute("data-pkg")] = dateEl.value;
   });
 
   $("addClsForm").addEventListener("submit", function (ev) {
@@ -1361,22 +1380,24 @@
     if (clsBusy[id]) return;
     clsBusy[id] = true;
     b.disabled = true;
-    // a fetch that never settles calls neither .then nor .catch, and the lock
-    // would then hold this course for the life of the page — reload the only
-    // way out. Past 30s the request is dead in any sense she cares about.
-    setTimeout(function () { clsBusy[id] = false; }, 30000);
-    var seq = clsPickSeq[id] || 0;
+    // No timeout releases this lock. A 30s release was tried and is a WORSE
+    // bug than the one it fixes: the request it gives up on may already have
+    // committed server-side, so the retry it permits writes a second
+    // class_events row — and both are counted by summarize_package, which
+    // moves money. A course held until reload is visible and recoverable; a
+    // duplicate class is neither. Safe release needs server-side idempotency
+    // (BACKLOG §6), not a guess about whether the write landed.
     api("classes-log", {package_id:id, kind:act, date:d})
       .then(function () {
-        // Back to today, in the box AND in the memory, so the next tap cannot
-        // silently reuse this one's date. Guarded on the PICK COUNTER, not on
-        // the date's value: a slow request outlives its own context, and she
-        // may have chosen since — including choosing this same date again,
-        // which value equality reads as "nothing happened". The box is re-found
-        // by id, because a re-render has already detached the row we captured.
-        if ((clsPickSeq[id] || 0) === seq) {
+        // Back to today, so the next tap cannot silently reuse this one's
+        // date — but only if the box still shows what we just logged. A slow
+        // request outlives its own context and she may have picked since;
+        // asking the BOX is the same question the tap asks, and unlike a
+        // change-event counter it also sees a re-pick that fired no event.
+        // Re-found by id, because a re-render has detached the row we captured.
+        var live = document.getElementById("c-date-" + id);
+        if (!live || live.value === d) {
           delete clsDates[id];
-          var live = document.getElementById("c-date-" + id);
           if (live) live.value = todayStr();
         }
         toast(t("cls_logged") + " · " + d); refreshClasses();
