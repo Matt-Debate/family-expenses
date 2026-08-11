@@ -85,6 +85,19 @@ CATEGORY_KEYS = tuple(key for key, _zh, _en in CATEGORIES)
 # of every expense total and reported on its own — repaying her must not read as
 # the family having spent that money.
 BORROW_CATEGORY = "borrow"
+
+# ── class tracker ────────────────────────────────────────────────────────
+# Two shapes of prepaid course, distinguished by what the money buys:
+#   per_class — a pack of N classes. Attending consumes one; what is left is
+#               classes you still own.
+#   period    — a flat month/semester fee. Nothing is consumed; what matters is
+#               the classes that did NOT happen, which are owed back.
+CLASS_KINDS = ("per_class", "period")
+# A missed class is owed back either way, but the cause is kept because only
+# one of them is worth arguing about: 'missed_school' is reclaimable,
+# 'missed_us' is what the household forfeited.
+CLASS_EVENT_KINDS = ("attended", "missed_school", "missed_us")
+_MISSED_EVENT_KINDS = ("missed_school", "missed_us")
 # category is nullable, and `category <> 'borrow'` is NULL (not true) for a NULL
 # category, which would silently drop uncategorised rows from every total.
 _NOT_BORROW = "COALESCE(category, '') <> 'borrow'"
@@ -346,6 +359,20 @@ class Store:
             row = self._fetch(tx, expense_id)
             if row is None:
                 return False
+            # A class package derives its money from this row. Deleting it
+            # would leave the package with no amount, so refuse and say what to
+            # do — cascading would silently destroy an attendance log that took
+            # a term to accumulate.
+            package = tx.query_one(
+                "SELECT id, name FROM class_packages WHERE expense_id = :id",
+                {"id": expense_id},
+            )
+            if package is not None:
+                raise ValidationError(
+                    f"this payment is tracked by the class package "
+                    f"{package['name']!r} — delete that package first (it holds "
+                    "the attendance log), then delete the payment"
+                )
             # history row survives the delete (pre-change snapshot)
             self._write_history(
                 tx, expense_id, "delete", changed_by,
@@ -503,6 +530,293 @@ class Store:
             )
             for r in rows
         ]
+
+    # ── class tracker ─────────────────────────────────────────────────────
+    @staticmethod
+    def _validate_class_count(value: Any) -> int:
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            raise ValidationError(
+                f"class_count {value!r} not understood — pass a whole number of "
+                "classes, e.g. 10"
+            )
+        if count < 1:
+            raise ValidationError(f"class_count must be at least 1, got {count}")
+        return count
+
+    @staticmethod
+    def _validate_class_kind(value: Any) -> str:
+        text = str(value or "").strip()
+        if text not in CLASS_KINDS:
+            raise ValidationError(
+                f"kind {value!r} invalid — use 'per_class' for a pack of N "
+                "classes you draw down, or 'period' for a flat month/semester "
+                "fee where missed classes are owed back"
+            )
+        return text
+
+    @staticmethod
+    def _validate_event_kind(value: Any) -> str:
+        text = str(value or "").strip()
+        if text not in CLASS_EVENT_KINDS:
+            raise ValidationError(
+                f"kind {value!r} invalid — use 'attended' (the class happened), "
+                "'missed_school' (they cancelled, so it is reclaimable) or "
+                "'missed_us' (we skipped it)"
+            )
+        return text
+
+    @classmethod
+    def summarize_package(
+        cls, package: dict[str, Any], amount: Any, events: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """The ONE place class-package arithmetic happens.
+
+        Money comes in as the linked expense's ``amount`` — the package stores
+        none of its own, so the tracker cannot drift from the ledger. Amounts
+        are computed from the exact ratio (``amount * n / count``) rather than
+        from a rounded per-class rate, so the parts still add up to the whole;
+        ``rate`` is a display figure only.
+        """
+        count = int(package["class_count"])
+        amount = float(amount or 0)
+        tally = {k: 0 for k in CLASS_EVENT_KINDS}
+        for event in events:
+            if event["kind"] in tally:
+                tally[event["kind"]] += 1
+        missed = sum(tally[k] for k in _MISSED_EVENT_KINDS)
+
+        def value(n: int) -> float:
+            return round(amount * n / count, 2) if count else 0.0
+
+        out: dict[str, Any] = {
+            "class_count": count,
+            "amount": round(amount, 2),
+            "rate": round(amount / count, 2) if count else 0.0,
+            "attended": tally["attended"],
+            "missed_school": tally["missed_school"],
+            "missed_us": tally["missed_us"],
+            "missed": missed,
+            "logged": tally["attended"] + missed,
+        }
+        if package["kind"] == "per_class":
+            used = tally["attended"]
+            remaining = max(0, count - used)
+            out.update({
+                "used": used,
+                "used_amount": value(min(used, count)),
+                "remaining": remaining,
+                "remaining_amount": value(remaining),
+                # attending more classes than were bought is a real thing that
+                # happens; report it rather than clamping it out of sight
+                "overrun": max(0, used - count),
+            })
+        else:
+            out.update({
+                "owed": missed,
+                "owed_amount": value(missed),
+                "reclaimable": tally["missed_school"],
+                "reclaimable_amount": value(tally["missed_school"]),
+                "forfeited": tally["missed_us"],
+                "forfeited_amount": value(tally["missed_us"]),
+            })
+        return out
+
+    _PACKAGE_SELECT = (
+        "SELECT p.id, p.expense_id, p.name, p.kind, p.class_count, "
+        "p.period_label, p.archived, p.created_at, p.updated_at, "
+        "e.amount AS expense_amount, e.date AS expense_date, "
+        "e.description AS expense_description, e.category AS expense_category, "
+        "e.paid AS expense_paid "
+        "FROM class_packages p JOIN expenses e ON e.id = p.expense_id"
+    )
+
+    def create_package(
+        self, *, expense_id: str, name: str, kind: str, class_count: Any,
+        period_label: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Track an expense that paid for a course.
+
+        The payment must already exist in the ledger — that row is where the
+        money lives, and this only records what it bought.
+        """
+        kind = self._validate_class_kind(kind)
+        class_count = self._validate_class_count(class_count)
+        name = (str(name).strip() if name else "")
+        if not name:
+            raise ValidationError(
+                "name is required — what the course is, e.g. '足球课' or 'Football'"
+            )
+        now = _utc_now_iso()
+        package_id = generate_id()
+        with self.db.tx() as tx:
+            expense = self._fetch(tx, str(expense_id))
+            if expense is None:
+                raise NotFoundError(expense_id)
+            existing = tx.query_one(
+                "SELECT id, name FROM class_packages WHERE expense_id = :eid",
+                {"eid": str(expense_id)},
+            )
+            if existing is not None:
+                raise ValidationError(
+                    f"that payment is already tracked by the class package "
+                    f"{existing['name']!r} — one payment, one package, or the "
+                    "same money would be counted twice"
+                )
+            tx.execute(
+                "INSERT INTO class_packages (id, expense_id, name, kind, "
+                "class_count, period_label, archived, created_at, updated_at) "
+                "VALUES (:id, :expense_id, :name, :kind, :class_count, "
+                ":period_label, :archived, :created_at, :updated_at)",
+                {
+                    "id": package_id, "expense_id": str(expense_id), "name": name,
+                    "kind": kind, "class_count": class_count,
+                    "period_label": (str(period_label).strip() or None)
+                    if period_label else None,
+                    "archived": False, "created_at": now, "updated_at": now,
+                },
+            )
+        return self.package(package_id)
+
+    def package(self, package_id: str) -> dict[str, Any]:
+        with self.db.tx() as tx:
+            row = tx.query_one(
+                f"{self._PACKAGE_SELECT} WHERE p.id = :id", {"id": str(package_id)}
+            )
+            if row is None:
+                raise NotFoundError(package_id)
+            events = tx.query(
+                "SELECT id, package_id, date, kind, note, logged_by, created_at "
+                "FROM class_events WHERE package_id = :id ORDER BY date DESC, created_at DESC",
+                {"id": str(package_id)},
+            )
+        return self._package_payload(row, events)
+
+    @classmethod
+    def _package_payload(
+        cls, row: dict[str, Any], events: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        payload = {
+            "id": row["id"], "expense_id": row["expense_id"], "name": row["name"],
+            "kind": row["kind"], "class_count": int(row["class_count"]),
+            "period_label": row["period_label"], "archived": bool(row["archived"]),
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+            "expense": {
+                "id": row["expense_id"], "amount": float(row["expense_amount"]),
+                "date": row["expense_date"], "description": row["expense_description"],
+                "category": row["expense_category"], "paid": bool(row["expense_paid"]),
+            },
+            "events": [dict(e) for e in events],
+        }
+        payload["summary"] = cls.summarize_package(
+            payload, row["expense_amount"], events
+        )
+        return payload
+
+    def list_packages(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
+        clause = "" if include_archived else " WHERE p.archived = :archived"
+        params = {} if include_archived else {"archived": False}
+        with self.db.tx() as tx:
+            rows = tx.query(
+                f"{self._PACKAGE_SELECT}{clause} ORDER BY e.date DESC, p.created_at DESC",
+                params,
+            )
+            # one query for every package's events rather than one per package
+            events = tx.query(
+                "SELECT id, package_id, date, kind, note, logged_by, created_at "
+                "FROM class_events ORDER BY date DESC, created_at DESC"
+            )
+        by_package: dict[str, list] = {}
+        for event in events:
+            by_package.setdefault(event["package_id"], []).append(event)
+        return [
+            self._package_payload(row, by_package.get(row["id"], [])) for row in rows
+        ]
+
+    def update_package(
+        self, package_id: str, *, fields: dict[str, Any]
+    ) -> dict[str, Any]:
+        if not isinstance(fields, dict) or not fields:
+            raise ValidationError("no fields to update")
+        allowed = {"name", "kind", "class_count", "period_label", "archived"}
+        unknown = set(fields) - allowed
+        if unknown:
+            hint = (
+                " — the amount lives on the linked expense; edit that instead"
+                if {"amount", "rate", "expense_id"} & unknown else ""
+            )
+            raise ValidationError(f"unknown update fields: {sorted(unknown)}{hint}")
+        clean: dict[str, Any] = {}
+        for key, value in fields.items():
+            if key == "class_count":
+                clean[key] = self._validate_class_count(value)
+            elif key == "kind":
+                clean[key] = self._validate_class_kind(value)
+            elif key == "archived":
+                clean[key] = bool(value)
+            elif key == "name":
+                text = (str(value).strip() if value else "")
+                if not text:
+                    raise ValidationError("name cannot be empty")
+                clean[key] = text
+            else:
+                clean[key] = (str(value).strip() or None) if value else None
+        clean["updated_at"] = _utc_now_iso()
+        set_clause = ", ".join(f"{k} = :{k}" for k in clean)  # keys checked above
+        with self.db.tx() as tx:
+            cur = tx.execute(
+                f"UPDATE class_packages SET {set_clause} WHERE id = :package_id",
+                dict(clean, package_id=str(package_id)),
+            )
+            if cur.rowcount == 0:
+                raise NotFoundError(package_id)
+        return self.package(package_id)
+
+    def delete_package(self, package_id: str) -> bool:
+        """Remove a package and its attendance log."""
+        with self.db.tx() as tx:
+            cur = tx.execute(
+                "DELETE FROM class_packages WHERE id = :id", {"id": str(package_id)}
+            )
+            if cur.rowcount == 0:
+                return False
+            tx.execute(
+                "DELETE FROM class_events WHERE package_id = :id",
+                {"id": str(package_id)},
+            )
+        return True
+
+    def log_class(
+        self, *, package_id: str, kind: str, date: Optional[str] = None,
+        note: Optional[str] = None, logged_by: Optional[str] = None,
+    ) -> dict[str, Any]:
+        kind = self._validate_event_kind(kind)
+        date = self._validate_date(date or today_str())
+        with self.db.tx() as tx:
+            exists = tx.query_one(
+                "SELECT id FROM class_packages WHERE id = :id", {"id": str(package_id)}
+            )
+            if exists is None:
+                raise NotFoundError(package_id)
+            tx.execute(
+                "INSERT INTO class_events (id, package_id, date, kind, note, "
+                "logged_by, created_at) VALUES (:id, :package_id, :date, :kind, "
+                ":note, :logged_by, :created_at)",
+                {
+                    "id": generate_id(), "package_id": str(package_id), "date": date,
+                    "kind": kind, "note": note, "logged_by": logged_by,
+                    "created_at": _utc_now_iso(),
+                },
+            )
+        return self.package(package_id)
+
+    def delete_class_event(self, event_id: str) -> bool:
+        with self.db.tx() as tx:
+            cur = tx.execute(
+                "DELETE FROM class_events WHERE id = :id", {"id": str(event_id)}
+            )
+            return cur.rowcount > 0
 
     # ── access tokens (operator-only minting — finding M2) ───────────────
     def mint_token(

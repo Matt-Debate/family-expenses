@@ -566,5 +566,142 @@ class ConstraintHardeningTests(unittest.TestCase):
         self.assertEqual(len(store.list()), 1)
 
 
+class ClassTrackerApiTests(unittest.TestCase):
+    """Tab 4 over the real HTTP path."""
+
+    def setUp(self):
+        self.client, self.store, self.token = make_client()
+
+    def post(self, _endpoint, **body):
+        # underscored: this feature's bodies carry a "name" field, which would
+        # otherwise bind to the positional and raise TypeError
+        body["token"] = self.token
+        return self.client.post(f"/api/{_endpoint}", json=body)
+
+    def a_payment(self, amount=2200, description="足球课"):
+        return self.post("submit", date="2026-08-03", amount=amount,
+                         description=description, category="aden-sports"
+                         ).json()["expense"]["id"]
+
+    def test_full_flow(self):
+        eid = self.a_payment()
+        r = self.post("classes-add", expense_id=eid, name="足球课",
+                      kind="per_class", class_count=10, period_label="8月")
+        self.assertEqual(r.status_code, 200, r.text)
+        pid = r.json()["package"]["id"]
+
+        r = self.post("classes-log", package_id=pid, kind="attended", date="2026-08-05")
+        s = r.json()["package"]["summary"]
+        self.assertEqual((s["remaining"], s["remaining_amount"]), (9, 1980.0))
+
+        listed = self.post("classes-list").json()
+        self.assertEqual(len(listed["packages"]), 1)
+        self.assertTrue(listed["today"])
+
+        event_id = listed["packages"][0]["events"][0]["id"]
+        self.assertEqual(self.post("classes-unlog", event_id=event_id).status_code, 200)
+        self.assertEqual(
+            self.post("classes-list").json()["packages"][0]["summary"]["remaining"], 10
+        )
+
+        self.assertEqual(self.post("classes-delete", id=pid).status_code, 200)
+        self.assertEqual(self.post("classes-list").json()["packages"], [])
+
+    def test_candidates_exclude_payments_already_tracked(self):
+        tracked = self.a_payment(description="足球课")
+        free = self.a_payment(amount=99, description="游泳课")
+        self.post("classes-add", expense_id=tracked, name="足球课",
+                  kind="per_class", class_count=10)
+        ids = [c["id"] for c in self.post("classes-list").json()["candidates"]]
+        self.assertEqual(ids, [free], "a tracked payment must not be offered again")
+
+    def test_portal_write_is_attributed_from_the_link_not_the_client(self):
+        """Same rule as expenses: the label on the token wins (A8/P4)."""
+        eid = self.a_payment()
+        pid = self.post("classes-add", expense_id=eid, name="足球课",
+                        kind="per_class", class_count=10).json()["package"]["id"]
+        r = self.post("classes-log", package_id=pid, kind="attended",
+                      logged_by="Mallory")
+        self.assertEqual(r.json()["package"]["events"][0]["logged_by"], "wife")
+
+    def test_errors_map_to_status_codes(self):
+        self.assertEqual(
+            self.post("classes-add", expense_id="nope", name="x",
+                      kind="per_class", class_count=1).status_code, 404)
+        eid = self.a_payment()
+        self.assertEqual(
+            self.post("classes-add", expense_id=eid, name="x",
+                      kind="weekly", class_count=1).status_code, 400)
+        self.assertEqual(self.post("classes-delete", id="nope").status_code, 404)
+        self.assertEqual(self.post("classes-unlog", event_id="nope").status_code, 404)
+
+    def test_deleting_a_tracked_payment_is_refused_with_a_reason(self):
+        eid = self.a_payment()
+        self.post("classes-add", expense_id=eid, name="足球课",
+                  kind="per_class", class_count=10)
+        r = self.post("delete", id=eid)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("delete that package first", r.json()["error"])
+
+
+class ClassKindParityTests(unittest.TestCase):
+    """The portal hard-codes the kind strings the store validates against.
+
+    They are two hand-maintained lists, exactly like the category keys — and a
+    silent mismatch here means a button that always errors, or a package the
+    portal renders as the wrong shape.
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def setUp(self):
+        self.portal = (self.ROOT / "app" / "portal.html").read_text(encoding="utf-8")
+
+    def test_package_kinds_match_the_store(self):
+        from app.store import CLASS_KINDS
+
+        for kind in CLASS_KINDS:
+            self.assertIn(f'value="{kind}"', self.portal,
+                          f"portal offers no option for package kind {kind!r}")
+
+    def test_event_kinds_match_the_store(self):
+        from app.store import CLASS_EVENT_KINDS
+
+        for kind in CLASS_EVENT_KINDS:
+            self.assertIn(f'data-c="{kind}"', self.portal,
+                          f"portal has no button that logs {kind!r}")
+            self.assertIn(f"{kind}:", self.portal,
+                          f"portal has no label for event kind {kind!r}")
+
+    def test_every_class_value_reaching_innerhtml_is_escaped(self):
+        """P6/XSS: a course name is free text and the rows are built with
+        innerHTML. Account for each interpolation of the package fields."""
+        # Scoped to the class-tracker block: `e` means an *expense* everywhere
+        # else in this file, so a whole-file scan only rediscovers those.
+        start = self.portal.index("  function clsLine(p) {")
+        end = self.portal.index("  function render() {")
+        block = self.portal[start:end]
+        self.assertIn("function renderClasses()", block, "block markers moved")
+        base = self.portal[:start].count("\n")
+        offenders = []
+        for offset, line in enumerate(block.splitlines()):
+            for expr in ("p.name", "p.period_label", "e.note", "e.logged_by",
+                         "e.date", "p.id", "e.id", "e.description"):
+                if expr not in line:
+                    continue
+                # subtract the known-safe forms, then see what is left — the
+                # same shape as PortalEscapingTests, because `esc(x || y)` is
+                # safe and a naive `esc(x)` match does not recognise it
+                residue = line.replace(f"esc({expr}", "")
+                # a property read or truthiness guard is not an interpolation
+                residue = re.sub(re.escape(expr) + r"\s*(\?|\)|\.|,|;|=|$)", "", residue)
+                if expr in residue:
+                    offenders.append(
+                        f"  app/portal.html:{base + offset + 1}: {line.strip()}"
+                    )
+        self.assertEqual(offenders, [], "unescaped class field in innerHTML:\n"
+                         + "\n".join(offenders))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,7 @@ EXPECTED_TOOLS = {
     "expenses_help", "expenses_list", "expenses_add", "expenses_mark_paid",
     "expenses_update", "expenses_delete", "expenses_history",
     "expenses_mint_link", "expenses_revoke_link", "expenses_list_links",
+    "classes_list", "classes_add", "classes_log",
 }
 
 _TEST_LOOP = asyncio.new_event_loop()
@@ -343,6 +344,74 @@ class AgentErgonomicsTests(unittest.TestCase):
             self.assertIn("expenses_list", message)   # where ids come from
             self.assertIn("query", message)           # the other way to target
             self.assertNotIn("KeyError", message)
+
+    def test_class_tracker_speaks_in_whole_answers(self):
+        """The note is the channel the agent reads back to the user, so it has
+        to carry the answer — classes AND money — not just confirm the write."""
+        self.call("expenses_add", amount="2200", description="足球课 8月")
+        added = self.call("classes_add", name="足球课", class_count="10",
+                          query="足球", period_label="8月")
+        self.assertIn("¥220.00", added["note"])
+        self.assertIn("classes_log", added["note"])
+
+        logged = self.call("classes_log", kind="attended", query="足球")
+        self.assertIn("9 of 10", logged["note"])
+        self.assertIn("¥1980.00", logged["note"])
+
+        listed = self.call("classes_list")
+        self.assertIn("9/10", listed["note"])
+
+    def test_period_package_note_names_what_is_reclaimable(self):
+        self.call("expenses_add", amount="2000", description="游泳课 9月")
+        package = self.call("classes_add", name="游泳课", class_count=8,
+                            kind="period", query="游泳", period_label="9月")
+        for kind in ("missed_school", "missed_school", "missed_us"):
+            note = self.call("classes_log", kind=kind,
+                             package_id=package["id"])["note"]
+        self.assertIn("¥750.00", note)      # owed in total
+        self.assertIn("¥500.00", note)      # the reclaimable half
+        self.assertIn("reclaimable", note)
+
+    def test_an_ambiguous_course_returns_candidates_rather_than_guessing(self):
+        for month in ("8月", "9月"):
+            self.call("expenses_add", amount="1000", description=f"足球课 {month}")
+            self.call("classes_add", name="足球课", class_count=5,
+                      query=month, period_label=month)
+        result = self.call("classes_log", kind="attended", query="足球")
+        self.assertEqual(result["matched"], 2)
+        self.assertEqual(len(result["candidates"]), 2)
+        self.assertIn("package_id", result["candidates"][0])
+
+    def test_class_tools_coach_when_the_payment_is_missing(self):
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        result = self.call("classes_add", name="足球课", class_count=5, query="足球")
+        self.assertEqual(result["matched"], 0)
+        self.assertIn("expenses_list", result["hint"])
+        with self.assertRaises(ToolError) as ctx:
+            run(self.mcp.call_tool("classes_log", {"kind": "nope", "query": "x"}))
+        self.assertIn("missed_school", str(ctx.exception))
+
+    def test_class_tool_descriptions_carry_bilingual_triggers(self):
+        desc = {
+            t.name: " ".join((t.description or "").split())
+            for t in run(self.mcp.list_tools())
+        }
+        self.assertIn("还剩几节课", desc["classes_list"])
+        self.assertIn("how many classes left", desc["classes_list"])
+        self.assertIn("今天上了足球课", desc["classes_log"])
+        # P3: a cross-reference is only guidance if it names something callable
+        self.assertIn("classes_add", desc["classes_list"])
+        self.assertIn("classes_log", desc["classes_list"])
+        self.assertIn("expenses_add", desc["classes_add"])
+        # the rate is derived, and the agent must not try to pass one
+        self.assertIn("do not pass a rate", desc["classes_add"])
+
+    def test_help_routes_class_questions(self):
+        text = self.call("expenses_help")
+        for anchor in ("classes_list", "classes_add", "classes_log",
+                       "missed_school", "per_class"):
+            self.assertIn(anchor, text)
 
     def test_write_results_carry_unpaid_total_note(self):
         added = self.call("expenses_add", amount="300", description="足球课")

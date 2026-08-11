@@ -140,8 +140,80 @@ def api_history(store: Store, body: dict) -> tuple[int, dict]:
     return 200, {"ok": True, "history": [h.to_dict() for h in entries]}
 
 
+@_guard
+def api_classes_list(store: Store, body: dict) -> tuple[int, dict]:
+    packages = store.list_packages(
+        include_archived=bool(body.get("include_archived"))
+    )
+    # the payments not yet tracked by a package, so the add form can offer them
+    # instead of asking her to type an amount that already exists in the ledger
+    linked = {p["expense_id"] for p in store.list_packages(include_archived=True)}
+    candidates = [
+        {"id": e.id, "date": e.date, "amount": e.amount,
+         "description": e.description, "category": e.category, "paid": e.paid}
+        for e in store.list(status="all") if e.id not in linked
+    ]
+    return 200, {
+        "ok": True, "packages": packages, "candidates": candidates,
+        "today": today_str(),
+    }
+
+
+@_guard
+def api_classes_add(store: Store, body: dict) -> tuple[int, dict]:
+    package = store.create_package(
+        expense_id=str(body.get("expense_id")),
+        name=body.get("name"),
+        kind=body.get("kind"),
+        class_count=body.get("class_count"),
+        period_label=body.get("period_label"),
+    )
+    return 200, {"ok": True, "package": package}
+
+
+@_guard
+def api_classes_log(store: Store, body: dict) -> tuple[int, dict]:
+    package = store.log_class(
+        package_id=str(body.get("package_id")),
+        kind=body.get("kind"),
+        date=body.get("date"),
+        note=body.get("note"),
+        logged_by=_author(body, "logged_by"),
+    )
+    return 200, {"ok": True, "package": package}
+
+
+@_guard
+def api_classes_unlog(store: Store, body: dict) -> tuple[int, dict]:
+    if not store.delete_class_event(str(body.get("event_id"))):
+        raise NotFoundError(body.get("event_id"))
+    return 200, {"ok": True}
+
+
+@_guard
+def api_classes_update(store: Store, body: dict) -> tuple[int, dict]:
+    fields = body.get("fields")
+    if not isinstance(fields, dict):
+        raise ValidationError("fields object is required")
+    package = store.update_package(str(body.get("id")), fields=fields)
+    return 200, {"ok": True, "package": package}
+
+
+@_guard
+def api_classes_delete(store: Store, body: dict) -> tuple[int, dict]:
+    if not store.delete_package(str(body.get("id"))):
+        raise NotFoundError(body.get("id"))
+    return 200, {"ok": True}
+
+
 HANDLERS = {
     "list": api_list,
+    "classes-list": api_classes_list,
+    "classes-add": api_classes_add,
+    "classes-log": api_classes_log,
+    "classes-unlog": api_classes_unlog,
+    "classes-update": api_classes_update,
+    "classes-delete": api_classes_delete,
     "submit": api_submit,
     "update": api_update,
     "mark-paid": api_mark_paid,

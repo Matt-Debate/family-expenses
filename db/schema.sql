@@ -60,3 +60,43 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   use_count     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_access_tokens_token ON access_tokens(token);
+
+-- ── class tracker (v0.10.0) ──────────────────────────────────────────────
+-- A package is a course paid for by exactly ONE expense row, and it stores no
+-- money of its own. The per-class rate is derived at read time from
+-- expenses.amount / class_count, so correcting the payment corrects the
+-- tracker and the two can never disagree — the same reason Store.summarize is
+-- the only totals implementation for expenses.
+--
+-- expense_id is UNIQUE for that reason: two packages on one payment would each
+-- claim the whole amount and silently double-count the money.
+CREATE TABLE IF NOT EXISTS class_packages (
+  id            TEXT PRIMARY KEY,
+  expense_id    TEXT NOT NULL UNIQUE,
+  name          TEXT NOT NULL,
+  -- 'per_class' — a pack of N classes; each attendance consumes one.
+  -- 'period'    — a flat month/semester fee; each missed class is owed back.
+  kind          TEXT NOT NULL CHECK (kind IN ('per_class', 'period')),
+  class_count   INTEGER NOT NULL CHECK (class_count > 0),
+  period_label  TEXT,
+  archived      BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_class_packages_expense ON class_packages(expense_id);
+
+-- One row per class that happened or didn't. 'missed_school' and 'missed_us'
+-- are both owed back on a period package, but reported apart: what the school
+-- cancelled is reclaimable, what we skipped is what we forfeited.
+CREATE TABLE IF NOT EXISTS class_events (
+  id          TEXT PRIMARY KEY,
+  package_id  TEXT NOT NULL,
+  date        TEXT NOT NULL,
+  kind        TEXT NOT NULL CHECK (
+                kind IN ('attended', 'missed_school', 'missed_us')
+              ),
+  note        TEXT,
+  logged_by   TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_class_events_package ON class_events(package_id, date);

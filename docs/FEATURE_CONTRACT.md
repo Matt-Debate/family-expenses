@@ -1,6 +1,7 @@
 # Feature Contract — Family Expenses
 
-**Status:** ACTIVE (v0.9.0; v0.8.1 deployed — in daily household use since 2026-08-11)
+**Status:** ACTIVE (v0.10.0; v0.9.0 deployed as `family-expenses-00012-lnq` —
+in daily household use since 2026-08-11)
 **Owner:** matt-debate
 **Repo:** `Matt-Debate/family-expenses`
 **Default branch:** `main`
@@ -69,6 +70,26 @@ no arrays, no PG-only expressions.
 `changed_at`, `snapshot` TEXT (JSON; post-change state, pre-change for delete).
 Never updated or deleted by application code.
 
+### `class_packages` / `class_events` (v0.10.0)
+
+A **package** is a prepaid course funded by exactly one `expenses` row
+(`expense_id` UNIQUE — two packages on one payment would each claim the whole
+amount and double-count it). It stores **no money of its own**: the per-class
+rate is `expenses.amount / class_count`, derived at read time, so correcting the
+payment corrects the tracker and the two cannot disagree. `kind` is `per_class`
+(a pack of N classes drawn down by attending) or `period` (a flat month/semester
+fee where the classes that did NOT happen are owed back). An expense that funds
+a package cannot be deleted until the package is — cascading would destroy an
+attendance log silently.
+
+**`class_events`** — one row per class: `attended`, `missed_school` (they
+cancelled, so it is reclaimable) or `missed_us` (we skipped, so it is
+forfeited). Both missed kinds count toward what is owed; the cause is reported
+separately because only one of them is worth arguing about.
+`Store.summarize_package` is the ONE implementation of this arithmetic, and
+amounts come from the exact ratio `amount * n / count` rather than a rounded
+per-class rate, so the parts still sum to the payment.
+
 ### `access_tokens`
 `id` PK, `token` TEXT UNIQUE (`secrets.token_hex(32)`), `label`,
 `expires_at` TEXT, `revoked` BOOLEAN DEFAULT FALSE, `created_at`,
@@ -117,6 +138,12 @@ portal page and the MCP mount.
 | `/api/mark-paid` | `id, paid, paid_date?, changed_by?` | set paid state + history(`mark_paid`/`unmark_paid`) |
 | `/api/delete` | `id, changed_by?` | delete + history(`delete`, pre-change snapshot) |
 | `/api/history` | `id` | audit trail for one expense |
+| `/api/classes-list` | `include_archived?` | packages with derived totals + the payments not yet tracked |
+| `/api/classes-add` | `expense_id, name, kind, class_count, period_label?` | start tracking a course |
+| `/api/classes-log` | `package_id, kind, date?, note?` | record one class (attended / missed_school / missed_us) |
+| `/api/classes-unlog` | `event_id` | take back one logged class |
+| `/api/classes-update` | `id, fields{name?,kind?,class_count?,period_label?,archived?}` | edit a package — never its money |
+| `/api/classes-delete` | `id` | remove a package and its class log |
 
 **Validation (server-authoritative):** `amount > 0`; `date`/`paid_date` are
 `YYYY-MM-DD`; `paid=true ⇒ paid_date`; unknown update fields rejected.
@@ -126,10 +153,11 @@ commit-on-success / rollback-on-error.
 
 ## 7. MCP surface (operator)
 
-Tools (10) on the Cloud Run streamable-HTTP MCP: `expenses_help`,
+Tools (13) on the Cloud Run streamable-HTTP MCP: `expenses_help`,
 `expenses_list`, `expenses_add`, `expenses_update`, `expenses_mark_paid`,
 `expenses_delete`, `expenses_history`, `expenses_mint_link`,
-`expenses_revoke_link`, `expenses_list_links` — inventory rationale in
+`expenses_revoke_link`, `expenses_list_links`, `classes_list`, `classes_add`,
+`classes_log` — inventory rationale in
 `docs/MCP_DESIGN.md` (`expenses_summary` folded into `list`). Plus three persona prompts
 (记账/对账/修复). Same store as the portal, so history/atomicity rules apply
 identically.
@@ -145,7 +173,7 @@ correcting call; write results carry the running unpaid total.
 
 ## 8. UI
 
-One mobile-first page, bilingual **中文 (default) / English**, three tabs:
+One mobile-first page, bilingual **中文 (default) / English**, four tabs:
 
 - **Due** — summary cards (due now · paid this month · upcoming within 30 days ·
   owed back to her), collapsible add form, what is due in the next 30 days, then
@@ -153,6 +181,10 @@ One mobile-first page, bilingual **中文 (default) / English**, three tabs:
 - **History** — a statement: one row per month (txns · paid · outstanding), most
   recent first, tap to expand into that month's items. Scheduled future months
   sit in their own group below.
+- **Classes** — prepaid courses. A per-class pack shows classes and money
+  remaining; a monthly/semester fee shows what is owed back, split into
+  reclaimable and forfeited. Tap a course for its class log. Its payload is
+  fetched when the tab is first opened, not on every page load.
 - **Stats** — figures and hand-rolled inline SVG charts (no chart library: no
   build step and no CDN is what makes this load behind the GFW).
 

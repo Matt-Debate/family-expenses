@@ -57,6 +57,22 @@ INTENT → TOOL:
 - "这条是谁改的 / what happened to X" → expenses_history
 - "给我老婆做个链接" → expenses_mint_link(label="wife") — link never expires
 - "哪些链接还在用 / who has a link / list the links" → expenses_list_links
+- "足球还剩几节课 / how many classes left / 还有几次" → classes_list
+- "足球课交了2200，10节课 / paid for 10 classes" → classes_add (the payment must
+  be in the ledger first — expenses_add, then classes_add(query=…))
+- "今天上了足球课 / went today" → classes_log(kind="attended")
+- "今天的课取消了 / they cancelled" → classes_log(kind="missed_school")
+- "今天没去 / we skipped" → classes_log(kind="missed_us")
+
+CLASS TRACKER — two shapes, and they answer different questions:
+- kind="per_class": a pack of N classes. Attending draws one down. Answers
+  "how many classes and how much money is LEFT".
+- kind="period": a flat month/semester fee. Nothing is drawn down; the classes
+  that did NOT happen are owed back. Answers "what do they owe us" — split into
+  reclaimable (missed_school: they cancelled) and forfeited (missed_us: we
+  skipped). Both count toward the total owed; the cause is what you argue with.
+A package carries NO money of its own: the rate is the linked payment's amount
+÷ class_count. To correct the price, edit the EXPENSE, not the package.
 
 CATEGORIES — prefer these EXACT keys. Anything else is accepted and counted as
 an ordinary household expense (and charted under whatever string you sent), so
@@ -315,6 +331,148 @@ def build_mcp(store: Store) -> FastMCP:
             return ambiguous
         return {"deleted": store.delete(eid, changed_by=changed_by),
                 "note": _summary_note()}
+
+    # ── class tracker ─────────────────────────────────────────────────────
+    def _resolve_package(package_id: Optional[str], query: Optional[str]):
+        packages = store.list_packages(include_archived=True)
+        if package_id:
+            return str(package_id), None
+        text = str(query or "").strip().lower()
+        if not text:
+            raise ValidationError(
+                "target missing: pass package_id, or query with a word from the "
+                "course name (e.g. query='足球')"
+            )
+        matches = [
+            p for p in packages
+            if text in (p["name"] or "").lower()
+            or text in (p["period_label"] or "").lower()
+        ]
+        if len(matches) == 1:
+            return matches[0]["id"], None
+        if not matches:
+            return None, {
+                "matched": 0, "candidates": [],
+                "hint": (f"no class package matches {query!r} — call classes_list "
+                         "to see them, or classes_add to start one"),
+            }
+        return None, {
+            "matched": len(matches),
+            "candidates": [
+                {"package_id": p["id"], "name": p["name"],
+                 "period_label": p["period_label"], "kind": p["kind"]}
+                for p in matches[:8]
+            ],
+            "hint": ("several courses match — show these to the user, ask which, "
+                     "then call again with that package_id"),
+        }
+
+    @mcp.tool(annotations=_READ)
+    def classes_list(include_archived: bool = False) -> dict[str, Any]:
+        """Prepaid courses and what is left of them. Use for: '还剩几节课/
+        how many classes left', '足球还有几次', '这个月缺了几节/how many did we
+        miss', 'what do they owe us'. Returns每 package with classes remaining
+        and money remaining (per_class), or classes owed back split into
+        reclaimable vs forfeited (period). To start tracking a course use
+        classes_add; to record a class use classes_log."""
+        packages = store.list_packages(include_archived=include_archived)
+        lines = []
+        for p in packages:
+            s = p["summary"]
+            if p["kind"] == "per_class":
+                lines.append(
+                    f"{p['name']} ({p['period_label'] or '—'}): "
+                    f"{s['remaining']}/{s['class_count']} classes left, "
+                    f"¥{s['remaining_amount']:.2f}"
+                )
+            else:
+                lines.append(
+                    f"{p['name']} ({p['period_label'] or '—'}): "
+                    f"{s['owed']} owed back = ¥{s['owed_amount']:.2f} "
+                    f"({s['reclaimable']} theirs / {s['forfeited']} ours)"
+                )
+        return {
+            "packages": packages,
+            "note": ("; ".join(lines) if lines else
+                     "no class packages yet — classes_add starts one from a payment "
+                     "already in the ledger"),
+        }
+
+    @mcp.tool(annotations=_WRITE)
+    def classes_add(
+        name: str,
+        class_count: Union[str, int],
+        kind: str = "per_class",
+        expense_id: Optional[str] = None,
+        query: Optional[str] = None,
+        period_label: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Start tracking a prepaid course, FROM a payment already recorded.
+        Use for: '足球课交了2200，10节课', 'paid for 10 football classes',
+        '报了8月的课'. Target the payment by query (a word from its
+        description) or expense_id — record it with expenses_add FIRST if it is
+        not in the ledger yet. kind='per_class' for a pack of N classes drawn
+        down one at a time; kind='period' for a flat month/semester fee where
+        MISSED classes are owed back. The per-class rate is derived from the
+        payment (amount ÷ class_count) — do not pass a rate. period_label is
+        free text like '8月' or '秋季学期'."""
+        eid, ambiguous = _resolve(expense_id, query, prefer_unpaid=False)
+        if ambiguous:
+            return ambiguous
+        package = store.create_package(
+            expense_id=eid, name=name, kind=kind,
+            class_count=class_count, period_label=period_label,
+        )
+        s = package["summary"]
+        package["note"] = (
+            f"tracking {s['class_count']} classes at ¥{s['rate']:.2f} each "
+            f"(¥{s['amount']:.2f} paid). "
+            + ("Log each class with classes_log(kind='attended')."
+               if package["kind"] == "per_class" else
+               "Log the ones that do NOT happen with classes_log("
+               "kind='missed_school') or kind='missed_us'.")
+        )
+        return package
+
+    @mcp.tool(annotations=_WRITE)
+    def classes_log(
+        kind: str,
+        package_id: Optional[str] = None,
+        query: Optional[str] = None,
+        date: Optional[str] = None,
+        note: Optional[str] = None,
+        logged_by: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Record one class against a course. Use for: '今天上了足球课/went to
+        football today' (kind='attended'), '今天的课取消了/they cancelled'
+        (kind='missed_school'), '今天没去/we skipped it' (kind='missed_us').
+        Target by query (a word from the course name) or package_id. Omit date
+        = today. On a per_class pack only 'attended' draws a class down; on a
+        period package the missed ones are what is owed back, and the cause
+        decides whether it is reclaimable ('missed_school') or forfeited
+        ('missed_us'). Read the result's note for what is left."""
+        # validate the kind BEFORE resolving the course: it is wrong no matter
+        # which package the agent meant, and reporting "no such course" first
+        # would cost a round trip to discover the real mistake
+        kind = store._validate_event_kind(kind)
+        pid, ambiguous = _resolve_package(package_id, query)
+        if ambiguous:
+            return ambiguous
+        package = store.log_class(
+            package_id=pid, kind=kind, date=date, note=note, logged_by=logged_by
+        )
+        s = package["summary"]
+        package["note"] = (
+            f"{s['remaining']} of {s['class_count']} classes left "
+            f"(¥{s['remaining_amount']:.2f})"
+            + (f" — NOTE: {s['overrun']} more attended than were paid for"
+               if s.get("overrun") else "")
+            if package["kind"] == "per_class" else
+            f"{s['owed']} class(es) owed back = ¥{s['owed_amount']:.2f} "
+            f"({s['reclaimable']} cancelled by them = ¥{s['reclaimable_amount']:.2f} "
+            f"reclaimable, {s['forfeited']} skipped by us)"
+        )
+        return package
 
     # ── link management ───────────────────────────────────────────────────
     @mcp.tool(annotations=_READ)

@@ -55,6 +55,10 @@ total, reported separately. `Store.summarize(rows)` is the ONE totals
 implementation; a filtered list must be summarised from its own rows, never from
 the whole table. Portal writes are attributed server-side from the link label; a
 client-supplied author is ignored.
+A **class package** stores no money: its rate is `expense.amount / class_count`,
+derived at read time. `Store.summarize_package(rows)` is the ONE implementation
+of that arithmetic, amounts are exact ratios (never a rounded rate × n), and
+logging a class moves no expense total — consumption is not spending.
 
 **P5 — Verify that your edit landed.**
 Scripted string replacements here have twice reported success and changed
@@ -86,7 +90,7 @@ transcript, a commit, or a doc. Pipe secrets straight into env vars
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 156 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 187 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 PORTAL_DEV_RELOAD=1 python3 -m app.main   # …and re-read portal.html per request
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link
@@ -98,10 +102,10 @@ scripts/deploy.sh --dry-run               # inspect; drop the flag to deploy
 
 | path | what |
 |---|---|
-| `app/store.py` | ALL reads/writes; every mutation writes an `expense_history` row in the same transaction; `summarize()`; token mint/validate/revoke |
+| `app/store.py` | ALL reads/writes; every mutation writes an `expense_history` row in the same transaction; `summarize()` / `summarize_package()`; token mint/validate/revoke |
 | `app/db.py` | portable layer: Postgres (`DATABASE_URL`) / sqlite (tests, shared locked conn); `:name` params both drivers |
-| `app/web.py` + `api.py` + `portal.html` | `/t/<token>` bilingual three-tab portal + `POST /api/*` (token revalidated every request) |
-| `app/mcp_server.py` | 10 tools + 记账/对账/修复 persona prompts + optional bearer middleware |
+| `app/web.py` + `api.py` + `portal.html` | `/t/<token>` bilingual four-tab portal (due · classes · history · stats) + `POST /api/*` (token revalidated every request) |
+| `app/mcp_server.py` | 13 tools + 记账/对账/修复 persona prompts + optional bearer middleware |
 | `app/auth.py` | portal Auth0 login; inert unless all four `AUTH0_*`/`SESSION_SECRET` vars are set. Guards the portal only, never `/mcp` |
 | `app/main.py` | one service: portal + API + `/mcp`; env `DATABASE_URL`, `APP_TZ`, `MCP_SECRET` (leave unset), `PORT`, `PORTAL_DEV_RELOAD` |
 | `db/schema.sql` | portable DDL, applied idempotently at startup; **first breaking change must start dated migration files** |

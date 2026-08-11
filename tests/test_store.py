@@ -546,5 +546,182 @@ class BacklogRegressionTests(unittest.TestCase):
         self.assertIn("Not/AZone", buf.getvalue())
 
 
+class ClassTrackerTests(unittest.TestCase):
+    """The class tracker holds no money of its own — every figure is derived
+    from the linked payment, so the ledger and the tracker cannot disagree."""
+
+    def setUp(self):
+        self.store = make_store()
+
+    def pack(self, *, amount=2200, count=10, kind="per_class", label="8月"):
+        expense = self.store.create(
+            date="2026-08-03", amount=amount, description="足球课",
+            category="aden-sports",
+        )
+        package = self.store.create_package(
+            expense_id=expense.id, name="足球课", kind=kind,
+            class_count=count, period_label=label,
+        )
+        return expense, package
+
+    # ── (a) per-class packs draw down ────────────────────────────────────
+    def test_per_class_pack_reports_classes_and_money_remaining(self):
+        _expense, package = self.pack()
+        self.assertEqual(package["summary"]["rate"], 220.0)
+        self.assertEqual(package["summary"]["remaining"], 10)
+        self.assertEqual(package["summary"]["remaining_amount"], 2200.0)
+        for day in ("2026-08-05", "2026-08-12", "2026-08-19"):
+            package = self.store.log_class(
+                package_id=package["id"], kind="attended", date=day
+            )
+        s = package["summary"]
+        self.assertEqual((s["used"], s["remaining"]), (3, 7))
+        self.assertEqual(s["remaining_amount"], 1540.0)
+        self.assertEqual(s["used_amount"], 660.0)
+
+    def test_attending_more_than_were_bought_is_reported_not_hidden(self):
+        _expense, package = self.pack(count=2)
+        for _ in range(3):
+            package = self.store.log_class(package_id=package["id"], kind="attended")
+        s = package["summary"]
+        self.assertEqual(s["remaining"], 0)          # never negative
+        self.assertEqual(s["remaining_amount"], 0.0)
+        self.assertEqual(s["overrun"], 1)            # but the fact survives
+
+    def test_a_missed_class_does_not_consume_a_prepaid_credit(self):
+        _expense, package = self.pack()
+        package = self.store.log_class(package_id=package["id"], kind="missed_school")
+        self.assertEqual(package["summary"]["remaining"], 10)
+
+    # ── (b) period fees owe back what did not happen ─────────────────────
+    def test_period_package_splits_owed_into_reclaimable_and_forfeited(self):
+        """The example from the spec: ¥2,000 for 8 classes, 3 missed."""
+        _expense, package = self.pack(amount=2000, count=8, kind="period", label="9月")
+        for kind in ("missed_school", "missed_school", "missed_us"):
+            package = self.store.log_class(
+                package_id=package["id"], kind=kind, date="2026-09-05"
+            )
+        s = package["summary"]
+        self.assertEqual(s["rate"], 250.0)
+        self.assertEqual((s["owed"], s["owed_amount"]), (3, 750.0))
+        self.assertEqual((s["reclaimable"], s["reclaimable_amount"]), (2, 500.0))
+        self.assertEqual((s["forfeited"], s["forfeited_amount"]), (1, 250.0))
+        # owed is the whole of it; the split is only for the argument
+        self.assertEqual(s["reclaimable_amount"] + s["forfeited_amount"], s["owed_amount"])
+
+    # ── money correctness ────────────────────────────────────────────────
+    def test_amounts_are_exact_ratios_not_a_rounded_rate_times_n(self):
+        """¥1,000 over 3 classes: a rounded ¥333.33 rate would lose a cent per
+        class and the parts would stop adding up to the payment."""
+        _expense, package = self.pack(amount=1000, count=3)
+        self.assertEqual(package["summary"]["rate"], 333.33)      # display only
+        self.assertEqual(package["summary"]["remaining_amount"], 1000.0)
+        package = self.store.log_class(package_id=package["id"], kind="attended")
+        s = package["summary"]
+        self.assertEqual(s["used_amount"] + s["remaining_amount"], 1000.0)
+
+    def test_the_rate_follows_the_payment_because_it_is_never_stored(self):
+        expense, package = self.pack(amount=2200, count=10)
+        self.assertEqual(package["summary"]["rate"], 220.0)
+        self.store.update(expense.id, fields={"amount": 2500})  # she was told wrong
+        self.assertEqual(self.store.package(package["id"])["summary"]["rate"], 250.0)
+
+    def test_one_payment_can_only_fund_one_package(self):
+        expense, _package = self.pack()
+        with self.assertRaises(ValidationError) as ctx:
+            self.store.create_package(
+                expense_id=expense.id, name="again", kind="per_class", class_count=5
+            )
+        self.assertIn("already tracked", str(ctx.exception))
+
+    def test_a_tracked_payment_cannot_be_deleted_out_from_under_its_package(self):
+        expense, package = self.pack()
+        self.store.log_class(package_id=package["id"], kind="attended")
+        with self.assertRaises(ValidationError) as ctx:
+            self.store.delete(expense.id)
+        self.assertIn("delete that package first", str(ctx.exception))
+        self.assertEqual(len(self.store.list()), 1)          # nothing was removed
+        self.assertEqual(len(self.store.package(package["id"])["events"]), 1)
+        # and it works once the package is gone
+        self.assertTrue(self.store.delete_package(package["id"]))
+        self.assertTrue(self.store.delete(expense.id))
+
+    def test_the_class_tracker_never_moves_an_expense_total(self):
+        """P4: Store.summarize is the one totals implementation and knows
+        nothing about classes. Consumption is not spending."""
+        _expense, package = self.pack()
+        before = self.store.summary(today="2026-08-11")
+        for _ in range(4):
+            self.store.log_class(package_id=package["id"], kind="attended")
+        self.assertEqual(self.store.summary(today="2026-08-11"), before)
+
+    def test_deleting_a_package_takes_its_class_log_with_it(self):
+        _expense, package = self.pack()
+        self.store.log_class(package_id=package["id"], kind="attended")
+        self.assertTrue(self.store.delete_package(package["id"]))
+        with self.store.db.tx() as tx:
+            left = tx.query("SELECT id FROM class_events WHERE package_id = :p",
+                            {"p": package["id"]})
+        self.assertEqual(left, [])
+
+    def test_one_logged_class_can_be_taken_back(self):
+        _expense, package = self.pack()
+        package = self.store.log_class(package_id=package["id"], kind="attended")
+        event_id = package["events"][0]["id"]
+        self.assertTrue(self.store.delete_class_event(event_id))
+        self.assertEqual(self.store.package(package["id"])["summary"]["used"], 0)
+        self.assertFalse(self.store.delete_class_event(event_id))  # already gone
+
+    # ── validation, all of it coaching ───────────────────────────────────
+    def test_validation_rejects_and_explains(self):
+        expense = self.store.create(date="2026-08-03", amount=100)
+        for fields, expected in (
+            ({"kind": "monthly"}, "per_class"),
+            ({"class_count": 0}, "at least 1"),
+            ({"class_count": "ten"}, "whole number"),
+            ({"name": "  "}, "name is required"),
+        ):
+            args = dict(expense_id=expense.id, name="足球课",
+                        kind="per_class", class_count=10)
+            args.update(fields)
+            with self.assertRaises(ValidationError) as ctx:
+                self.store.create_package(**args)
+            self.assertIn(expected, str(ctx.exception))
+
+    def test_a_package_needs_a_payment_that_exists(self):
+        with self.assertRaises(KeyError) as ctx:
+            self.store.create_package(
+                expense_id="nope", name="足球课", kind="per_class", class_count=4
+            )
+        self.assertIn("expenses_list", str(ctx.exception))
+
+    def test_logging_rejects_an_unknown_event_kind(self):
+        _expense, package = self.pack()
+        with self.assertRaises(ValidationError) as ctx:
+            self.store.log_class(package_id=package["id"], kind="cancelled")
+        self.assertIn("missed_school", str(ctx.exception))
+
+    def test_the_price_cannot_be_edited_on_the_package(self):
+        """The money lives on the expense; two places to edit it is two places
+        for it to be wrong."""
+        _expense, package = self.pack()
+        with self.assertRaises(ValidationError) as ctx:
+            self.store.update_package(package["id"], fields={"amount": 999})
+        self.assertIn("lives on the linked expense", str(ctx.exception))
+
+    def test_logging_defaults_to_today(self):
+        from app.store import today_str
+
+        _expense, package = self.pack()
+        package = self.store.log_class(package_id=package["id"], kind="attended")
+        self.assertEqual(package["events"][0]["date"], today_str())
+
+    def test_archived_packages_are_hidden_unless_asked_for(self):
+        _expense, package = self.pack()
+        self.store.update_package(package["id"], fields={"archived": True})
+        self.assertEqual(self.store.list_packages(), [])
+        self.assertEqual(len(self.store.list_packages(include_archived=True)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

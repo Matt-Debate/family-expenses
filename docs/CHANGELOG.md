@@ -10,6 +10,48 @@ Nothing pending. (The block that sat here described `CLAUDE.md` and
 moved into a release entry; `git log` places them and the entries below now
 carry them.)
 
+## [0.10.0] — 2026-08-11
+
+### Added
+- **Class tracker — a fourth portal tab, three MCP tools, two tables.** Prepaid
+  courses in the two shapes this household actually buys:
+  - **per_class** — a pack of N classes (足球课 · 8月 · 10课). Attending draws one
+    down; the tab answers "how many classes and how much money are LEFT".
+  - **period** — a flat month/semester fee. Nothing is drawn down; the classes
+    that did NOT happen are owed back. Reported as one owed figure **split into
+    reclaimable** (`missed_school` — they cancelled) and **forfeited**
+    (`missed_us` — we skipped), because only the first is worth arguing about.
+    Whether that becomes a rollover or a refund is a conversation, not a field.
+- `classes_list`, `classes_add`, `classes_log` on the MCP (13 tools). `classes_add`
+  targets the payment by `query` like every other tool, and refuses to invent
+  one: the expense must be in the ledger first.
+- `db/class_packages` + `db/class_events` in `db/schema.sql` — additive, so no
+  dated migration files are started.
+
+### Money semantics
+- **A package holds no money of its own.** The per-class rate is derived at read
+  time from `expenses.amount / class_count`. Correct the payment and the tracker
+  corrects itself; there is no second place for the price to be wrong, and
+  `update_package` refuses an `amount` field and says where it lives.
+- **`expense_id` is UNIQUE.** Two packages funded by one payment would each
+  claim the whole amount and silently double-count it.
+- **Amounts are exact ratios, never a rounded rate × n.** ¥1,000 over 3 classes
+  reports a ¥333.33 rate for display, but used + remaining still equals ¥1,000.
+- **Consumption is not spending**: `Store.summarize` knows nothing about
+  classes, so no expense total moves when a class is logged. Attending a class
+  you already paid for is not a new expense.
+- **A payment that funds a package cannot be deleted** until the package is.
+  Cascading would silently destroy an attendance log that took a term to build;
+  the error says what to do instead.
+
+### Changed
+- `classes_log` validates the event kind **before** resolving which course was
+  meant — a bad kind is wrong whichever course it is, and reporting "no such
+  course" first cost a round trip to find the real mistake.
+- The portal's candidate `<option>` escapes per value rather than once around
+  the concatenation, so the invariant `ClassKindParityTests` checks is literally
+  what the code does.
+
 ## [0.9.1] — 2026-08-11
 
 ### Fixed

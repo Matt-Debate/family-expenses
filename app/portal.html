@@ -142,6 +142,9 @@
   .btns .del { color:var(--danger); }
   .editbox, .histbox { padding:0 0 14px; }
   .hist { font-size:.75rem; color:var(--muted); margin:3px 0; overflow-wrap:anywhere; }
+  /* inline × that removes one logged class from a course */
+  .hist .lnk { width:auto; display:inline; border:0; padding:0 4px; cursor:pointer;
+    color:var(--danger); font-size:.85rem; line-height:1; background:transparent; }
   .empty { text-align:center; color:var(--muted); padding:22px 8px 10px; font-size:.88rem; }
 
   /* ---- history: a bare statement ---- */
@@ -239,9 +242,43 @@
 
   <section id="pane-history" hidden=""><div class="panel" id="historyBody"></div></section>
   <section id="pane-stats" hidden=""><div id="statsBody"></div></section>
+
+  <section id="pane-classes" hidden="">
+    <details class="add" id="addClsWrap">
+      <summary data-i18n="cls_add"></summary>
+      <form id="addClsForm" autocomplete="off">
+        <label for="clsExpense" data-i18n="cls_payment"></label>
+        <select id="clsExpense" required=""></select>
+        <div class="row">
+          <div>
+            <label for="clsName" data-i18n="cls_name"></label>
+            <input id="clsName" type="text" required="">
+          </div>
+          <div>
+            <label for="clsCount" data-i18n="cls_count"></label>
+            <input id="clsCount" type="number" min="1" step="1" required="">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="clsKind" data-i18n="cls_kind"></label>
+            <select id="clsKind"></select>
+          </div>
+          <div>
+            <label for="clsPeriod" data-i18n="cls_period"></label>
+            <input id="clsPeriod" type="text" data-i18n-ph="cls_period_ph">
+          </div>
+        </div>
+        <div class="hist" id="clsRateHint"></div>
+        <button type="submit" class="primary" data-i18n="cls_save"></button>
+      </form>
+    </details>
+    <div id="classesBody"></div>
+  </section>
 </div>
 <nav class="tabs" id="tabs">
   <button class="tab on" data-tab="now"></button>
+  <button class="tab" data-tab="classes"></button>
   <button class="tab" data-tab="history"></button>
   <button class="tab" data-tab="stats"></button>
 </nav>
@@ -263,7 +300,17 @@
     zh: { title:"家庭开支", due_now:"待付", upcoming:"即将到期", lent:"待还我",
       paid_month:"本月已付", add:"添加一笔", amount:"金额 (¥)", due:"到期日",
       desc:"内容", desc_ph:"买了什么 / 给谁付", category:"分类", save_new:"添加",
-      tab_now:"待付", tab_history:"记录", tab_stats:"分析",
+      tab_now:"待付", tab_classes:"课程", tab_history:"记录", tab_stats:"分析",
+      cls_add:"添加课程", cls_payment:"哪一笔付款", cls_name:"课程名称",
+      cls_count:"课时数", cls_kind:"类型", cls_period:"周期", cls_period_ph:"如 8月",
+      cls_save:"添加", cls_kind_per:"按次（一共几节）", cls_kind_period:"按月／学期",
+      cls_rate:"每节", cls_left:"剩", cls_used:"已上", cls_cls:"节",
+      cls_owed:"欠我们", cls_reclaim:"可退", cls_forfeit:"自己缺",
+      cls_attend:"✓ 上了", cls_cancel:"停课", cls_skip:"没去",
+      cls_none:"还没有课程", cls_no_payment:"先在「待付」里记下这笔付款",
+      cls_confirm_del:"删除这个课程和它的上课记录？", cls_over:"超出",
+      cls_logged:"已记录", cls_sec:"课程", cls_of:"共",
+      ev:{ attended:"上了", missed_school:"停课", missed_us:"没去" },
       sec_due:"待付 · 未来30天", sec_paid:"本月已付", sec_lent:"待还我",
       empty_due:"没有待付的", empty_paid:"本月还没有付款记录", empty_all:"还没有记录",
       mark_paid:"✓ 标记已付", unmark:"取消已付", edit:"编辑", del:"删除", hist:"记录",
@@ -290,7 +337,17 @@
     en: { title:"Family Expenses", due_now:"To pay", upcoming:"Upcoming", lent:"Owed to me",
       paid_month:"Paid this month", add:"Add an expense", amount:"Amount (¥)", due:"Due date",
       desc:"Description", desc_ph:"what / who to pay", category:"Category", save_new:"Add",
-      tab_now:"Due", tab_history:"History", tab_stats:"Stats",
+      tab_now:"Due", tab_classes:"Classes", tab_history:"History", tab_stats:"Stats",
+      cls_add:"Add a course", cls_payment:"Which payment", cls_name:"Course",
+      cls_count:"Classes", cls_kind:"Type", cls_period:"Period", cls_period_ph:"e.g. 8月",
+      cls_save:"Add", cls_kind_per:"Per class (a pack)", cls_kind_period:"Monthly · semester",
+      cls_rate:"each", cls_left:"left", cls_used:"attended", cls_cls:"classes",
+      cls_owed:"owed to us", cls_reclaim:"reclaimable", cls_forfeit:"we skipped",
+      cls_attend:"✓ Attended", cls_cancel:"Cancelled", cls_skip:"We skipped",
+      cls_none:"No courses yet", cls_no_payment:"Record the payment on the Due tab first",
+      cls_confirm_del:"Delete this course and its class log?", cls_over:"over",
+      cls_logged:"Logged", cls_sec:"Courses", cls_of:"of",
+      ev:{ attended:"attended", missed_school:"cancelled", missed_us:"skipped" },
       sec_due:"Due · next 30 days", sec_paid:"Paid this month", sec_lent:"Owed to me",
       empty_due:"Nothing due", empty_paid:"No payments yet this month", empty_all:"Nothing yet",
       mark_paid:"✓ Mark paid", unmark:"Unmark paid", edit:"Edit", del:"Delete", hist:"History",
@@ -320,6 +377,8 @@
   var tab = "now";
   var expenses = [];
   var summary = {};
+  var packages = [];    // class tracker, loaded by refreshClasses()
+  var candidates = [];  // payments not yet tracked by a package
 
   function t(key) { var v = STR[lang][key]; return typeof v === "string" ? v : key; }
   function $(id) { return document.getElementById(id); }
@@ -414,6 +473,10 @@
       return '<option value="' + esc(c) + '">' + esc(STR[lang].cat[c] || c) + "</option>";
     }).join("");
     if (keep) sel.value = keep;
+    var ks = $("clsKind"), keepKind = ks.value;
+    ks.innerHTML = '<option value="per_class">' + esc(t("cls_kind_per")) +
+      '</option><option value="period">' + esc(t("cls_kind_period")) + "</option>";
+    if (keepKind) ks.value = keepKind;
     render();
   }
   $("langBtn").addEventListener("click", function () {
@@ -431,8 +494,12 @@
       el.classList.toggle("on", el.getAttribute("data-tab") === tab);
     });
     $("pane-now").hidden = tab !== "now";
+    $("pane-classes").hidden = tab !== "classes";
     $("pane-history").hidden = tab !== "history";
     $("pane-stats").hidden = tab !== "stats";
+    // the class tab has its own payload; fetch it the first time it is
+    // opened rather than on every page load
+    if (tab === "classes") { refreshClasses(); return; }
     render();
   });
 
@@ -840,9 +907,103 @@
         barsSvg(series) + "</div>";
   }
 
+  // ---- tab 4: class tracker ----
+  // A package holds no money of its own — every figure here is derived by the
+  // server from the linked payment, so this renders what it is told and never
+  // recomputes a total. Two shapes: a per_class pack draws down, a period fee
+  // owes back what did not happen.
+  function clsLine(p) {
+    var s = p.summary;
+    if (p.kind === "per_class") {
+      return {
+        big: s.remaining + "/" + s.class_count,
+        sub: t("cls_rate") + " " + money0(s.rate) + " · " +
+             t("cls_used") + " " + s.used +
+             (s.overrun ? " · " + t("cls_over") + " " + s.overrun : ""),
+        amt: t("cls_left") + " " + money0(s.remaining_amount),
+        cls: s.remaining > 0 ? "soon" : "paid",
+      };
+    }
+    return {
+      big: String(s.owed),
+      sub: t("cls_rate") + " " + money0(s.rate) + " · " +
+           t("cls_reclaim") + " " + money0(s.reclaimable_amount) +
+           " (" + s.reclaimable + ") · " +
+           t("cls_forfeit") + " " + money0(s.forfeited_amount) + " (" + s.forfeited + ")",
+      amt: t("cls_owed") + " " + money0(s.owed_amount),
+      cls: s.owed > 0 ? "lend" : "paid",
+    };
+  }
+
+  function renderClasses() {
+    var sel = $("clsExpense");
+    // only payments not already tracked: one payment, one package, or the same
+    // money would be counted twice
+    sel.innerHTML = candidates.length
+      ? candidates.map(function (e) {
+          // escaped per value, not once around the concatenation: the guard in
+          // ClassKindParityTests reads it that way, and so does the next person
+          return '<option value="' + esc(e.id) + '">' +
+            esc(e.description || categoryLabel(e) || "–") + " · " +
+            esc(money0(e.amount)) + " · " + esc(e.date) + "</option>";
+        }).join("")
+      : '<option value="">' + esc(t("cls_no_payment")) + "</option>";
+    clsRateHint();
+
+    var body = $("classesBody");
+    if (!packages.length) {
+      body.innerHTML = '<div class="empty">' + esc(t("cls_none")) + "</div>";
+      return;
+    }
+    body.innerHTML = '<div class="sec"><h2>' + esc(t("cls_sec")) + "</h2><span class='tot'>" +
+      esc(packages.length + " " + t("cls_cls")) + "</span></div><div class='list'>" +
+      packages.map(function (p) {
+        var L = clsLine(p);
+        var title = esc(p.name) + (p.period_label ? " · " + esc(p.period_label) : "");
+        return '<div class="item" data-pkg="' + esc(p.id) + '">' +
+          '<div class="ex-hd"><div class="ex-txt">' +
+            '<div class="ex-desc">' + title + ' <span class="st ' + L.cls + '">' +
+              esc(L.big) + "</span></div>" +
+            '<div class="ex-sub">' + esc(L.sub) + "</div>" +
+          '</div><div class="ex-amt">' + esc(L.amt) + "</div></div>" +
+          '<div class="btns" hidden="">' +
+            (p.kind === "per_class"
+              ? '<button class="pay" data-c="attended">' + esc(t("cls_attend")) + "</button>"
+              : "") +
+            '<button data-c="missed_school">' + esc(t("cls_cancel")) + "</button>" +
+            '<button data-c="missed_us">' + esc(t("cls_skip")) + "</button>" +
+            '<button class="del" data-c="delpkg">' + esc(t("del")) + "</button>" +
+          "</div>" +
+          '<div class="histbox" hidden="">' + clsEvents(p) + "</div>" +
+        "</div>";
+      }).join("") + "</div>";
+  }
+
+  function clsEvents(p) {
+    if (!p.events.length) return '<div class="hist">–</div>';
+    return p.events.map(function (e) {
+      return '<div class="hist">' + esc(e.date) + " · " +
+        esc(STR[lang].ev[e.kind] || e.kind) +
+        (e.logged_by ? " · " + esc(e.logged_by) : "") +
+        (e.note ? " · " + esc(e.note) : "") +
+        ' <button class="lnk" data-unlog="' + esc(e.id) + '">×</button></div>';
+    }).join("");
+  }
+
+  function clsRateHint() {
+    var el = $("clsRateHint"), chosen = $("clsExpense").value;
+    var pick = candidates.filter(function (c) { return c.id === chosen; })[0];
+    var n = parseInt($("clsCount").value, 10);
+    el.textContent = (pick && n > 0)
+      ? t("cls_rate") + " " + money(pick.amount / n) + "  (" + money0(pick.amount) +
+        " ÷ " + n + ")"
+      : "";
+  }
+
   function render() {
     // cards live inside the "now" pane, so they only cost work when it is shown
     if (tab === "now") { renderCards(); renderNow(); }
+    else if (tab === "classes") renderClasses();
     else if (tab === "history") renderHistory();
     else renderStats();
   }
@@ -959,6 +1120,73 @@
         }).join("") || '<div class="hist">–</div>';
       }).catch(function (e) { toast(e.message); });
     }
+  });
+
+  // ---- class tracker: fetch + actions ----
+  function refreshClasses() {
+    return api("classes-list", {}).then(function (j) {
+      packages = j.packages || [];
+      candidates = j.candidates || [];
+      if (j.today) { serverToday = j.today; serverTodayAt = Date.now(); }
+      renderClasses();
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  $("clsExpense").addEventListener("change", clsRateHint);
+  $("clsCount").addEventListener("input", clsRateHint);
+
+  $("addClsForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    if (!$("clsExpense").value) { toast(t("cls_no_payment")); return; }
+    api("classes-add", {
+      expense_id: $("clsExpense").value,
+      name: $("clsName").value.trim(),
+      kind: $("clsKind").value,
+      class_count: parseInt($("clsCount").value, 10),
+      period_label: $("clsPeriod").value.trim() || null,
+    }).then(function () {
+      $("clsName").value = ""; $("clsCount").value = ""; $("clsPeriod").value = "";
+      $("addClsWrap").open = false;
+      toast(t("added")); refreshClasses();
+    }).catch(function (e) { toast(e.message); });
+  });
+
+  $("classesBody").addEventListener("click", function (ev) {
+    var itemEl = ev.target.closest && ev.target.closest("[data-pkg]");
+    if (!itemEl) return;
+    var id = itemEl.getAttribute("data-pkg");
+
+    var unlog = ev.target.closest && ev.target.closest("[data-unlog]");
+    if (unlog) {
+      ev.stopPropagation();
+      api("classes-unlog", {event_id: unlog.getAttribute("data-unlog")})
+        .then(function () { toast(t("deleted")); refreshClasses(); })
+        .catch(function (e) { toast(e.message); });
+      return;
+    }
+
+    var b = ev.target.closest && ev.target.closest("button[data-c]");
+    if (!b) {  // tapping the row opens its actions and its class log
+      var open = itemEl.classList.toggle("open");
+      itemEl.querySelector(".btns").hidden = !open;
+      itemEl.querySelector(".histbox").hidden = !open;
+      return;
+    }
+    ev.stopPropagation();
+    var act = b.getAttribute("data-c");
+    if (act === "delpkg") {
+      if (!confirm(t("cls_confirm_del"))) return;
+      api("classes-delete", {id:id})
+        .then(function () { toast(t("deleted")); refreshClasses(); })
+        .catch(function (e) { toast(e.message); });
+      return;
+    }
+    // logging a class asks for the date, defaulting to the household's today
+    var d = prompt(t("due"), todayStr());
+    if (!d) return;
+    api("classes-log", {package_id:id, kind:act, date:d.trim()})
+      .then(function () { toast(t("cls_logged")); refreshClasses(); })
+      .catch(function (e) { toast(e.message); });
   });
 
   // ---- init ----
