@@ -946,10 +946,12 @@
           // an expense can be entered already-paid, which is a single 'create'
           // entry — without the date it carries, the trail would not say when
           // the money actually moved
-          // only on 'create': a mark_paid entry already says so in its action,
-          // and repeating it there reads as a duplicate
-          var paidOn = (h.action === "create" && snap.paid && snap.paid_date)
-            ? " · " + esc(STR[lang].act.mark_paid) + " " + esc(snap.paid_date) : "";
+          // Whenever the row is paid — not just on 'create'. The payment date
+          // is typed into a prompt, so it can be any date: `changed_at` says
+          // when the entry was made, `paid_date` when the money moved, and
+          // gating this to one action silently dropped the second.
+          var paidOn = (snap.paid && snap.paid_date)
+            ? " · " + esc(t("paid_on")) + " " + esc(snap.paid_date) : "";
           return '<div class="hist">' + esc(String(h.changed_at).replace("T", " ")) + " · " +
             esc(STR[lang].act[h.action] || h.action) +
             (h.changed_by ? " · " + esc(h.changed_by) : "") +

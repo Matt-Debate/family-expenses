@@ -386,7 +386,7 @@ class ServerDecidesTodayTests(unittest.TestCase):
     def test_history_shows_when_an_already_paid_row_was_paid(self):
         """Collapsing create+mark_paid into one entry hid the payment date the
         surviving row carries — the trail stopped saying when money moved."""
-        self.assertIn("h.action === \"create\" && snap.paid && snap.paid_date", self.portal)
+        self.assertIn("(snap.paid && snap.paid_date)", self.portal)
         self.assertIn("esc(snap.paid_date)", self.portal)  # P6: never interpolate raw
 
 
@@ -455,6 +455,18 @@ class PortalDateArithmeticTests(unittest.TestCase):
                     % jump_days
                 )
                 self.assertEqual(self.run_js(setup, "todayStr()"), "2026-09-01")
+
+    def test_exceeding_the_cap_refetches_exactly_once(self):
+        """The clamp keeps the date safe; the refetch is what makes it correct
+        again. Removing the refetch left the whole suite green, so it needed
+        its own guard — and the one-shot latch is what stops a render storm."""
+        setup = (
+            'serverToday = "2026-08-31"; serverTodayAt = 0;\n'
+            "var calls = 0; refresh = function () { calls++; };\n"
+            "Date.now = function () { return 9 * 86400000; };\n"
+            "todayStr(); todayStr(); todayStr();"
+        )
+        self.assertEqual(self.run_js(setup, "calls"), "1")
 
     def test_the_date_rolls_over_a_year_boundary(self):
         setup = (
