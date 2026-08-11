@@ -111,7 +111,7 @@ Related, from the same review:
 ## 4. ~~Form-submit handlers are an untested layer, project-wide~~ — CLOSED
 
 **Filed 2026-08-11** by the ninth review round of v0.10.0. **Closed 2026-08-11**
-in v0.10.1, when a review round pointed out that the release had changed the
+in v0.11.0, when a review round pointed out that the release had changed the
 meaning of a field one of those handlers reads.
 
 Both handlers now run under node against stub form fields —
@@ -126,7 +126,7 @@ than NULL, and the category read from the wrong field.
 
 ## 5. `store.find` matches the category column, so a query can hit a row that never mentions it
 
-**Filed 2026-08-11** by the third review round of v0.10.1. Priority: medium —
+**Filed 2026-08-11** by the third review round of v0.11.0. Priority: medium —
 it is the same defect class that round fixed on the class side, sitting on the
 tools that move money directly. **Pre-existing and untouched by that release**
 (`store.find` and `_resolve` are unchanged across `57033b8..HEAD`).
@@ -138,7 +138,7 @@ and no signal about which column produced it. A reviewer demonstrated
 word appears nowhere in its description. Every targeting tool routes through
 it: `expenses_mark_paid`, `expenses_update`, `expenses_delete`, `classes_add`.
 
-**Why it is filed rather than fixed.** v0.10.1 fixed exactly this shape in
+**Why it is filed rather than fixed.** v0.11.0 fixed exactly this shape in
 `_resolve_package` — description matches became a weaker tier that never
 resolves alone. The same tiering is the obvious fix here (`description` is the
 primary signal, `category` the fallback, and a category-only match asks). But
@@ -153,7 +153,7 @@ used by write tools needs the tier.
 
 ## 6. `classes_log` has no idempotency, so a retry cannot be made safe
 
-**Filed 2026-08-11** by the third cross-model review of v0.10.1. Priority:
+**Filed 2026-08-11** by the third cross-model review of v0.11.0. Priority:
 medium — it bounds what the portal is allowed to do about a lost response.
 
 `class_events` has no uniqueness constraint (`db/schema.sql`), and
@@ -161,7 +161,7 @@ medium — it bounds what the portal is allowed to do about a lost response.
 but whose response is lost therefore cannot be retried safely: the retry writes
 a second row, both are counted by `summarize_package`, and the money moves.
 
-**What this already cost.** v0.10.1 added a per-course in-flight lock, then a
+**What this already cost.** v0.11.0 added a per-course in-flight lock, then a
 30-second timer to release it if a request never settled. The timer was a worse
 bug than the deadlock it fixed — it is precisely the blind retry described
 above. It was removed. A course whose request never settles now stays locked
@@ -191,7 +191,7 @@ that is the whole reason this entry is here.
 
 ## 7. Twelve live rows carry a category that is not a category
 
-**Filed 2026-08-11** while building the v0.10.1 dropdown filter. Priority: low —
+**Filed 2026-08-11** while building the v0.11.0 dropdown filter. Priority: low —
 no total is wrong — but it is invisible from inside the code.
 
 `category` is free text by design (the MCP can write anything), and the twelve

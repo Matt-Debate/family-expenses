@@ -1,6 +1,6 @@
 # Feature Contract — Family Expenses
 
-**Status:** ACTIVE (v0.10.1; v0.10.0 deployed as `family-expenses-00013-nvm` —
+**Status:** ACTIVE (v0.11.0; v0.10.0 deployed as `family-expenses-00013-nvm` —
 in daily household use since 2026-08-11)
 **Owner:** matt-debate
 **Repo:** `Matt-Debate/family-expenses`
@@ -197,7 +197,7 @@ The nav order is Due · Classes · History · Stats.
   reclaimable and forfeited. Tap a course for its class log. Its payload is
   fetched when the tab is opened rather than on page load, and each fetch
   carries a generation number so a slow earlier response cannot repaint stale
-  totals over fresh ones. Since v0.10.1: the payment dropdown offers only
+  totals over fresh ones. Since v0.11.0: the payment dropdown offers only
   `store.CLASS_CATEGORIES` (`aden-edu`, `aden-sports`) — a view filter, not a
   money rule, since the store and MCP still link a package to any expense; a
   per-class pack is not asked for a period label; logging a class uses a date

@@ -31,7 +31,7 @@ Each of these came from a specific failure. `docs/LESSONS.md` records what
 happened in each case — read it before a review or a fix wave, because a rule
 you know the origin of transfers to cases it does not literally name. The two
 that cost the most: **a fix is not a verified state** (five of six fix waves in
-v0.10.1 introduced a defect of their own), and **a test stub more permissive
+v0.11.0 introduced a defect of their own), and **a test stub more permissive
 than the real object cannot fail**.
 
 **P1 — The compatibility contract outranks every other consideration.**
@@ -95,7 +95,7 @@ touching money gets a cross-model pass (`/codex-verify`) as a **distinct gate,
 not a further round of the same review** — a same-model reviewer inherits the
 framing of the code it is reading. One such review found six real defects that
 had all passed a 117-test suite; another found the only money-moving defect in
-v0.10.1 after three same-model rounds had read the same lines
+v0.11.0 after three same-model rounds had read the same lines
 (`docs/LESSONS.md` §2). Review does not stop until **no must-fix and no
 should-fix remains**, re-checked after the last change.
 

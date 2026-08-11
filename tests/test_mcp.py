@@ -394,7 +394,7 @@ class AgentErgonomicsTests(unittest.TestCase):
         self.assertEqual(result["period_label"], "9月")
 
     def test_two_same_named_packs_are_told_apart_by_their_payment(self):
-        """Since v0.10.1 the portal does not ask a per_class pack for a period
+        """Since v0.11.0 the portal does not ask a per_class pack for a period
         label, so two terms of 足球课 created there are both called 足球课 with
         nothing else on them. Candidates carrying only name/period_label/kind
         would be three identical rows, and the disambiguation question the agent

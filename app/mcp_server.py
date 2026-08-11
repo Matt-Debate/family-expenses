@@ -362,7 +362,7 @@ def build_mcp(store: Store) -> FastMCP:
             return named[0]["id"], None  # only a retired course matches: still reachable
         # The funding payment is the weaker signal, and only consulted when the
         # course names miss: a per_class pack carries no period label since
-        # v0.10.1, so '8月' has nowhere else to match — it lives in
+        # v0.11.0, so '8月' has nowhere else to match — it lives in
         # "Football (8月, 10课)". It never resolves on its own, because the
         # payment for 游泳课 may well say "足球课 8月 (转游泳)", and drawing a
         # class off swimming when the owner said football is a wrong write with
@@ -427,7 +427,7 @@ def build_mcp(store: Store) -> FastMCP:
         for p in packages:
             s = p["summary"]
             # the period label, or the payment behind it: a per_class package
-            # created from the portal has no label since v0.10.1, and two terms
+            # created from the portal has no label since v0.11.0, and two terms
             # of one course would otherwise both read "足球课 (—)" here. The
             # payment's DESCRIPTION, not its date — two terms bought in one
             # sitting share a date, and she writes the month in the description.

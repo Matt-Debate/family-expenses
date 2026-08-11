@@ -16,7 +16,7 @@ Two things to know before reading:
 
 ## 1. A fix is not a verified state
 
-**What happened.** v0.10.1 went through six review rounds. **Five of six fix
+**What happened.** v0.11.0 went through six review rounds. **Five of six fix
 waves introduced a new defect of their own.** The fix for the stale-date bug was
 ambiguous by construction; the fix for *that* froze the date permanently; the
 fix for the deadlock was a blind retry that could double-log money; the fix for
@@ -77,7 +77,7 @@ was not supplied by the test itself through an untransformed path.
 Scripted string replacements have twice reported success and changed nothing,
 with the suite still green because the affected path was short-circuited.
 
-Two refinements the v0.10.1 review added:
+Two refinements the v0.11.0 review added:
 
 - **A mutation runner must assert its target test exists and passes first.**
   `unittest` exits non-zero for a test name that does not resolve, which reads

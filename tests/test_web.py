@@ -522,7 +522,7 @@ class PortalDateArithmeticTests(unittest.TestCase):
     def run_js(self, setup: str, expr: str) -> str:
         script = (
             "var serverToday = null, serverTodayAt = 0, resyncing = false;\n"
-            # null = the pre-v0.10.1 behaviour (roll over on elapsed hours);
+            # null = the pre-v0.11.0 behaviour (roll over on elapsed hours);
             # a test that cares about midnight sets it in `setup`
             "var serverMidnightIn = null;\n"
             "var refresh = function () { throw new Error('unexpected refetch'); };\n"

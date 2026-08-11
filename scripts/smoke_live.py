@@ -207,7 +207,7 @@ async def exercise_public_mcp(base: str) -> None:
                     "create", "update", "mark_paid",
                 ]
 
-                # The class tracker, end to end. Until v0.10.1 these three
+                # The class tracker, end to end. Until v0.11.0 these three
                 # tools appeared in this script only as names in the inventory
                 # assertion, so a deploy whose Classes tab was entirely broken
                 # still printed PASS. ¥1000 over 3 is the split that does not

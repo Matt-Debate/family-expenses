@@ -10,7 +10,12 @@ Nothing pending. (The block that sat here described `CLAUDE.md` and
 moved into a release entry; `git log` places them and the entries below now
 carry them.)
 
-## [0.10.1] — 2026-08-11
+## [0.11.0] — 2026-08-11
+
+Cut as a **minor** version, not the patch it was drafted as: it changes
+behaviour she can see (the payment filter, the hidden period field, the date
+picker), adds `midnight_in` to two API responses, and changes when
+`classes_log` writes versus asks. P7 calls that a minor bump.
 
 Six things the owner hit within a day of the class tracker going live, plus
 what two review rounds found in the fixes for them. All of it is the Classes
