@@ -874,16 +874,64 @@ function categoryLabel(e) {{ return e.category || ""; }}
         )
         self.assertIn('<div class="hist">–</div>', html)
 
+    # A <select> is not a plain object: replacing innerHTML resets it to the
+    # first option, and assigning a value that is not an option is ignored.
+    # Modelling that is the whole point — with a bare `{value: ""}` stub, and a
+    # fixture holding one candidate, "keep her pick" and "take the first one"
+    # are the same string and the test cannot fail.
+    SELECT_STUB = """
+function makeSelect() {
+  var self = {_html: "", _value: "", _options: []};
+  Object.defineProperty(self, "innerHTML", {
+    get: function () { return self._html; },
+    set: function (v) {
+      self._html = v;
+      self._options = (v.match(/value="([^"]*)"/g) || []).map(function (m) {
+        return m.slice(7, -1); });
+      self._value = self._options.length ? self._options[0] : "";
+    }});
+  Object.defineProperty(self, "value", {
+    get: function () { return self._value; },
+    set: function (v) { if (self._options.indexOf(v) >= 0) self._value = v; }});
+  return self;
+}
+nodes["clsExpense"] = makeSelect();
+"""
+
     def test_the_add_form_keeps_the_payment_she_picked(self):
         """Every row tap re-renders the tab and rebuilds this select. Losing
-        the selection means the next course is linked to whichever payment
-        happens to be listed first."""
+        the selection silently links the next course to whichever payment
+        happens to be listed first — and that payment is the amount the whole
+        tracker divides."""
         html = self.render(
             open_ids=[],
-            seed='nodes["clsExpense"] = {innerHTML:"", value:"x1", textContent:""};',
+            seed=self.SELECT_STUB + """
+candidates = [
+  {"id":"x1","description":"足球课","amount":2200,"date":"2026-08-03","category":"aden-sports"},
+  {"id":"x2","description":"游泳课","amount":1000,"date":"2026-08-04","category":"aden-sports"}
+];
+// a prior render, then her pick: the SECOND payment, not the first
+nodes["clsExpense"].innerHTML = '<option value="x1"></option><option value="x2"></option>';
+nodes["clsExpense"].value = "x2";
+""",
             read='nodes["clsExpense"].value',
         )
-        self.assertEqual(html.strip(), "x1")
+        self.assertEqual(html.strip(), "x2",
+                         "the re-render reverted her pick to the first payment")
+
+    def test_a_payment_that_is_no_longer_offered_leaves_the_picker_clean(self):
+        """Her previous pick may have just been linked to a package, so it is
+        gone from candidates. Restoring it must not fabricate a selection."""
+        html = self.render(
+            open_ids=[],
+            seed=self.SELECT_STUB + """
+nodes["clsExpense"].innerHTML = '<option value="gone"></option>';
+nodes["clsExpense"].value = "gone";
+""",
+            read='JSON.stringify(nodes["clsExpense"].value)',
+        )
+        # falls back to whatever the rebuilt list offers, never to "gone"
+        self.assertNotIn("gone", html)
 
     def test_the_rate_hint_divides_the_payment_by_the_class_count(self):
         """The figure she reads when deciding whether the course is priced

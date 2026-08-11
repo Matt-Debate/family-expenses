@@ -183,9 +183,36 @@ defect:
   decides whether a course is priced right.
 - The **stale-response generation counter**, the **payment-picker preservation**
   and the **empty class-log placeholder** were all unreferenced by the suite.
+  (The picker guard written here was itself inert — its fixture held one
+  candidate, so "keep her pick" and "take the first one" were the same string,
+  and the `<select>` stub allowed values that were not options. Round eight
+  caught it; the stub now models a real select and the fixture has two.)
 - `test_a_course_with_no_classes_logged_still_renders` was a grep for a literal
   that also appears in the History tab, so deleting the branch it named left it
   passing. It now renders.
+
+### Fixed after the fifth review round
+The eighth round found no wrong behavior in the class tracker. It found one
+inert guard and, outside the feature, one way to lock her out of the portal.
+
+- **An infinite expense amount bricked the portal.** `inf > 0` is true, so it
+  passed validation and committed; `JSONResponse` serialises with
+  `allow_nan=False`, so **every subsequent `/api/list` returned 500** and the
+  row could only be removed with database access. Reachable from the MCP and
+  from any raw JSON body (the portal's own form cannot produce it). Not a class
+  tracker defect — `_validate_amount` has been this way since v0.4.0 — but
+  v0.10.0 hardened `class_count` against exactly nan/inf/overflow while
+  `amount`, the more damaging field, kept none of it.
+- The payment-picker guard added in round four **could not fail**: its fixture
+  held one candidate, so "keep her pick" and "take the first one" were the same
+  string, and its `<select>` stub accepted values that were not options. The
+  stub now models a real select — replacing `innerHTML` resets the selection,
+  and an absent value is refused — and the fixture has two candidates.
+- `docs/FEATURE_CONTRACT.md` stated the period derivation backwards
+  (`owed = reclaimable + forfeited`). The identity holds, but it is a
+  consequence, not the rule — and computing the total from two rounded parts is
+  precisely how it came to exceed the payment. A future implementer reading the
+  contract as spec would have reintroduced it.
 
 ### Changed
 - `classes_log` validates the event kind **before** resolving which course was

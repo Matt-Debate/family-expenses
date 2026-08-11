@@ -116,6 +116,16 @@ class ValidationTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 self.store.create(date="2026-07-14", amount=bad)
 
+    def test_an_infinite_amount_cannot_lock_her_out_of_the_portal(self):
+        """`inf > 0` is True, so it used to commit — and JSONResponse
+        serialises with allow_nan=False, so EVERY later /api/list returned 500.
+        One bad write, and the only way back was database access."""
+        for bad in (float("inf"), float("-inf"), float("nan"), "inf", "nan"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValidationError):
+                    self.store.create(date="2026-07-14", amount=bad)
+        self.assertEqual(self.store.list(), [], "a bad amount was persisted")
+
     def test_date_format(self):
         for bad in ("", None, "14/07/2026", "2026-7-4"):
             with self.assertRaises(ValidationError):

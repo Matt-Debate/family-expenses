@@ -90,7 +90,10 @@ separately because only one of them is worth arguing about.
 Amounts come from the exact ratio `amount * n / count`, never a rounded
 per-class rate, and **the figures that sit side by side are derived from each
 other rather than rounded independently**: `remaining_amount` is
-`amount - used_amount`, and `owed_amount` is `reclaimable + forfeited`. Three
+`amount - used_amount`, and `forfeited_amount` is `owed_amount - reclaimable_amount`.
+The identity `owed = reclaimable + forfeited` holds, but it is a consequence,
+not the derivation — computing the total from two rounded parts is exactly how
+it came to exceed the payment. Three
 independent `round()` calls do not reconcile — ¥1,000 over 3 classes gave an
 owed total a cent adrift from its own halves. Money is also capped at the
 payment: over-logging is reported as an `overrun` count, never as owing back

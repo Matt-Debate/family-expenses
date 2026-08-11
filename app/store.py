@@ -209,6 +209,14 @@ class Store:
             )
         if not (val > 0):
             raise ValidationError(f"amount must be greater than 0, got {val}")
+        if not isfinite(val):
+            # `inf > 0` is True, so this passed the check above and committed.
+            # JSONResponse serialises with allow_nan=False, so EVERY later
+            # /api/list then 500s — and the row can only be removed by someone
+            # with database access. One bad write locks her out of the portal.
+            raise ValidationError(
+                f"amount {original!r} is not a real number — pass digits, e.g. 300"
+            )
         return val
 
     @staticmethod
