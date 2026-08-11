@@ -10,6 +10,23 @@ Nothing pending. (The block that sat here described `CLAUDE.md` and
 moved into a release entry; `git log` places them and the entries below now
 carry them.)
 
+## [0.9.1] — 2026-08-11
+
+### Fixed
+- **`scripts/smoke_live.py` could not verify a deployment any more.** Its portal
+  check followed the 302 to `/login` into Auth0, whose login page answers 400 to
+  a scripted request — so post-deploy verification aborted with a traceback and
+  read as a dead service. It now checks the redirect without following it (302 →
+  `/login` is the *success* signal when the portal is behind Auth0), asserts
+  `/api/*` refuses an unauthenticated caller, and leaves the write path to the
+  MCP flow it already had. Broken since v0.5.0 added the portal login; found by
+  running it, which is the only way this was ever going to surface.
+- **The smoke output printed a live portal token** in the redirect Location.
+  Tokens are bearer credentials and this output gets pasted into transcripts —
+  P9. All hex runs of 32+ chars are now redacted at the print boundary.
+- The closing line told the operator to mint the household link next. That was
+  true on deploy day and misleading ever since.
+
 ## [0.9.0] — 2026-08-11
 
 Clears `docs/BACKLOG.md`: every deferred code defect is fixed, the two

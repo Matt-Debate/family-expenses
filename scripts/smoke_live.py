@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -57,6 +58,41 @@ def get(url: str):
         return r.status, r.read().decode()
 
 
+_TOKEN_RE = re.compile(r"[0-9a-f]{32,}")
+
+
+def redact_tokens(text: str) -> str:
+    """Never let a portal token reach stdout — it is a bearer credential and
+    this script's output gets pasted into transcripts and CI logs."""
+    return _TOKEN_RE.sub("<redacted>", text or "")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def get_no_redirect(url: str) -> tuple[int, str, str]:
+    """(status, Location, body) without following the redirect.
+
+    The portal sits behind Auth0 since v0.5.0, so a valid link answers 302 →
+    /login. Following that lands on Auth0's own login page, which answers 400
+    to a scripted request — and this script read that as a dead deployment.
+    """
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(url, timeout=30) as r:
+            return r.status, r.headers.get("Location", ""), r.read().decode()
+    except urllib.error.HTTPError as exc:
+        body = ""
+        if exc.code not in (301, 302, 303, 307, 308):
+            try:
+                body = exc.read().decode()
+            except Exception:
+                body = ""
+        return exc.code, exc.headers.get("Location", ""), body
+
+
 def post(base: str, name: str, **body):
     req = urllib.request.Request(
         f"{base}/api/{name}", data=json.dumps(body).encode(),
@@ -71,6 +107,43 @@ def _tool_payload(result):
     if structured is not None:
         return structured.get("result", structured)
     return json.loads(result.content[0].text)
+
+
+def exercise_portal_api(base: str, token: str) -> None:
+    """The full portal flow over /api/*. Only reachable when the portal is NOT
+    behind Auth0 — with login on, these endpoints answer 401 to a script and
+    the MCP flow below is what proves the write path end to end."""
+    out = post(base, "submit", token=token, date="2026-01-01",
+               amount=1.23, description="[smoke] delete me", submitted_by="smoke")
+    eid = out["expense"]["id"]
+    check("submit", out["ok"])
+
+    out = post(base, "list", token=token, status="unpaid")
+    check("list shows it", any(e["id"] == eid for e in out["expenses"]))
+    check("list carries the household's today", bool(out.get("today")), str(out.get("today")))
+
+    out = post(base, "update", token=token, id=eid, changed_by="smoke",
+               fields={"amount": 2.34, "description": "[smoke] updated"})
+    check("update", out["expense"]["amount"] == 2.34 and
+          out["expense"]["description"] == "[smoke] updated")
+
+    out = post(base, "mark-paid", token=token, id=eid,
+               paid=True, paid_date="2026-01-02", changed_by="smoke")
+    check("mark paid", out["expense"]["paid"])
+
+    out = post(base, "mark-paid", token=token, id=eid,
+               paid=False, changed_by="smoke")
+    check("unmark paid", not out["expense"]["paid"] and
+          out["expense"]["paid_date"] is None)
+
+    out = post(base, "history", token=token, id=eid)
+    actions = [h["action"] for h in out["history"]]
+    check("history atomic trail", actions == [
+        "create", "update", "mark_paid", "unmark_paid"
+    ], str(actions))
+
+    out = post(base, "delete", token=token, id=eid, changed_by="smoke")
+    check("delete (cleanup)", out["ok"])
 
 
 async def exercise_public_mcp(base: str) -> None:
@@ -167,47 +240,39 @@ def main() -> int:
         status, _ = get(f"{base}/health")
         check("GET /health", status == 200)
 
-        status, html = get(f"{base}/t/{token}")
-        check("portal page serves for valid token", status == 200 and "家庭开支" in html)
+        status, location, html = get_no_redirect(f"{base}/t/{token}")
+        portal_behind_login = status == 302 and location.startswith("/login")
+        check(
+            "portal accepts the link"
+            + (" (302 → /login, Auth0 on)" if portal_behind_login else ""),
+            portal_behind_login or (status == 200 and "家庭开支" in html),
+            # the Location carries ?next=/t/<token>; printing it would put a
+            # live portal token in a terminal, a CI log or a pasted transcript
+            f"status={status} location={redact_tokens(location) or '-'}",
+        )
 
-        try:
-            get(f"{base}/t/definitely-wrong-token")
-            check("bad token rejected", False, "expected 404")
-        except urllib.error.HTTPError as exc:
-            check("bad token rejected (404)", exc.code == 404)
+        status, _location, _body = get_no_redirect(f"{base}/t/definitely-wrong-token")
+        # 404 before any login round trip: a bad link must not send someone to
+        # Auth0 only to be rejected at the end of it
+        check("bad token rejected (404, without a login round trip)", status == 404,
+              f"status={status}")
 
-        print("3. Full expense flow (temporary data, cleaned up below)")
-        out = post(base, "submit", token=token, date="2026-01-01",
-                   amount=1.23, description="[smoke] delete me", submitted_by="smoke")
-        eid = out["expense"]["id"]
-        check("submit", out["ok"])
-
-        out = post(base, "list", token=token, status="unpaid")
-        check("list shows it", any(e["id"] == eid for e in out["expenses"]))
-
-        out = post(base, "update", token=token, id=eid, changed_by="smoke",
-                   fields={"amount": 2.34, "description": "[smoke] updated"})
-        check("update", out["expense"]["amount"] == 2.34 and
-              out["expense"]["description"] == "[smoke] updated")
-
-        out = post(base, "mark-paid", token=token, id=eid,
-                   paid=True, paid_date="2026-01-02", changed_by="smoke")
-        check("mark paid", out["expense"]["paid"])
-
-        out = post(base, "mark-paid", token=token, id=eid,
-                   paid=False, changed_by="smoke")
-        check("unmark paid", not out["expense"]["paid"] and
-              out["expense"]["paid_date"] is None)
-
-        out = post(base, "history", token=token, id=eid)
-        actions = [h["action"] for h in out["history"]]
-        check("history atomic trail", actions == [
-            "create", "update", "mark_paid", "unmark_paid"
-        ], str(actions))
-
-        out = post(base, "delete", token=token, id=eid, changed_by="smoke")
-        check("delete (cleanup)", out["ok"])
-        eid = None
+        if portal_behind_login:
+            print("3. Portal API is guarded; mutations verified over MCP in step 4")
+            # /api/* is session-guarded, so this script cannot drive it. That the
+            # guard HOLDS is the assertion worth making here.
+            for name in ("list", "submit"):
+                try:
+                    post(base, name, token=token)
+                    check(f"/api/{name} refuses an unauthenticated caller", False,
+                          "expected 401")
+                except urllib.error.HTTPError as exc:
+                    check(f"/api/{name} refuses an unauthenticated caller",
+                          exc.code == 401, f"status={exc.code}")
+            eid = None
+        else:
+            print("3. Full expense flow (temporary data, cleaned up below)")
+            exercise_portal_api(base, token)
 
         status, _ = get(f"{base}/health")  # still alive after the workout
         check("service healthy after flow", status == 200)
@@ -233,8 +298,7 @@ def main() -> int:
         check("smoke link revoked", store.revoke_token(token))
 
     print("\nRESULT:", "FAIL — see ✗ above" if FAILED else
-          "PASS — deployment verified end-to-end. Mint the real link next "
-          "(scripts/mint_link.py --label wife --base-url " + base + ")")
+          "PASS — deployment verified end-to-end.")
     return 1 if FAILED else 0
 
 
