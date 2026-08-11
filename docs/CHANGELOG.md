@@ -64,8 +64,9 @@ fixed, and every one of those mutations is now caught.
   `overrun`, matching what the per-class branch already did.
 - **The reclaimable/forfeited split did not reconcile with the total.** Three
   independent `round()` calls meant ¥1,000 over 3 classes reported owed ¥666.67
-  against parts of ¥333.33 + ¥333.33. `owed_amount` is now derived from its own
-  parts, and `remaining_amount` by subtraction, so both always sum exactly.
+  against parts of ¥333.33 + ¥333.33. (This round's fix — deriving the total
+  from its parts — turned out to breach the cap in the other direction; see the
+  second review round below for the rule that actually holds.)
 - **The class figures were rounded to whole yuan in the portal** while the
   server and MCP reported cents — ¥667 on the tab whose job is telling a school
   what it owes.
