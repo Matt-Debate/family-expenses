@@ -183,7 +183,7 @@ portal page and the MCP mount.
 | `/api/history` | `id` | audit trail for one expense — since v0.13.0 also its refunds and the course it funds |
 | `/api/refund` | `id, amount, date?, reason?, resize_package_to?` | record money that came back + history(`refund`); `resize_package_to` edits the funded course's `class_count` in the same transaction (+ history(`package_update`)) |
 | `/api/refund-delete` | `refund_id` | remove one refund + history(`refund_delete`, pre-change refund in the snapshot) |
-| `/api/classes-list` | `include_archived?` | packages with derived totals (ALL of them) + the untracked payments in `store.CLASS_CATEGORIES` only + `today`/`midnight_in`. The portal asks for archived rows and partitions them into 已结课 |
+| `/api/classes-list` | `include_archived?` | packages with derived totals (ALL of them) + the untracked payments in `store.CLASS_CATEGORIES` only + `today`/`midnight_in`. The portal asks for archived rows and partitions them into 已结课, with a spent per-class pack (0 left) joining them unwritten |
 | `/api/classes-add` | `expense_id, name, kind, class_count, period_label?` | start tracking a course + history(`package_create`) |
 | `/api/classes-log` | `package_id, kind, date? \| dates?, note?` | record one class (attended / missed_school / missed_us) — or a list of dates, all or nothing — + history(`class_log`) |
 | `/api/classes-unlog` | `event_id` | take back one logged class + history(`class_unlog`); returns the package |
@@ -278,7 +278,15 @@ The nav order is Due · Classes · History · Stats.
   已结课 group at the foot of the tab rather than disappearing: the tab now
   fetches archived rows and partitions **one** list, and
   `ClassArchivePartitionTests` asserts every course reaches the markup exactly
-  once, in the section it belongs to.
+  once, in the section it belongs to. **Unreleased** (CHANGELOG
+  [Unreleased], not yet deployed): a **per-class pack with no classes left is
+  in that group without the flag** — the class log settles it,
+  and the last class logged says so in its toast. It is derived at render time
+  and never written back, so unlogging a class returns the course to the
+  running list; **a period fee is excluded**, since 0 owed is also what a month
+  going fine looks like, and only 结课 retires one. The 结课 / 恢复 toggle is
+  drawn only where it would move the row, and an empty running list under a
+  list of finished courses says 没有在上的课程 rather than 还没有课程.
 - **Stats** — figures and hand-rolled inline SVG charts (no chart library: no
   build step and no CDN is what makes this load behind the GFW).
 

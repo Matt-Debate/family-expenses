@@ -1399,8 +1399,13 @@ class ClassTabInteractionTests(unittest.TestCase):
 
     PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
 
-    def run_handler(self, driver: str) -> dict:
-        """Run the real classesBody handler body with stubbed globals."""
+    def run_handler(self, driver: str, reply: dict | None = None) -> dict:
+        """Run the real classesBody handler body with stubbed globals.
+
+        `reply`: the body `api()` resolves with — the server's own answer,
+        which the log handler reads to say whether that class was the last
+        one. Default `{}`, as before.
+        """
         import json
 
         src = self.PORTAL.read_text(encoding="utf-8")
@@ -1408,7 +1413,15 @@ class ClassTabInteractionTests(unittest.TestCase):
         end = src.index("  // ---- init ----")
         handler = src[start:end]
         self.assertIn("openPkgs[id]", handler, "handler markers moved")
-        harness = """
+        # The REAL clsSpent, not a stub: it is what the handler calls, and a
+        # stub here would let the test supply the answer it is checking
+        # (LESSONS §3). It is also the same function the renderer partitions
+        # on, so the toast and the row that moves cannot disagree.
+        spent = src[src.index("  function clsSpent(p) {"):
+                    src.index("  function renderClasses() {")]
+        self.assertIn("p.summary.remaining", spent, "clsSpent markers moved")
+        harness = ("var reply = " + json.dumps(reply if reply is not None else {})
+                   + ";\n" + spent) + """
 var openPkgs = {}, logged = [], rendered = 0, apiCalls = [];
 // clsDates only carries a pick across a re-render; the BOX (dateEl) is what
 // the handler reads, so a driver states the date by setting dateEl.value
@@ -1436,7 +1449,7 @@ var rejectWith = null; // an Error to fail with: .answered = the server replied
 var held = [];
 function resolveLog() {   // let a held request come back, later than its context
   var fns = held; held = [];
-  fns.forEach(function (f) { f({}); });
+  fns.forEach(function (f) { f(reply); });
 }
 function api(name, body) {
   apiCalls.push({name: name, body: body});
@@ -1444,7 +1457,7 @@ function api(name, body) {
                         catch: function () { return this; } };
   if (rejectWith) return { then: function () { return this; },
                            catch: function (f) { f(rejectWith); return this; } };
-  return { then: function (f) { f({}); return this; },
+  return { then: function (f) { f(reply); return this; },
            catch: function () { return this; } };
 }
 var button = {disabled: false, getAttribute: function (a) {
@@ -1732,6 +1745,44 @@ resolveLog();
         what makes a wrong one visible at the moment it happens."""
         state = self.run_handler('dateEl.value = "2026-07-02";\n' + self.LOG_TAP)
         self.assertIn("2026-07-02", state["toasts"][-1])
+
+    @staticmethod
+    def logged(kind: str, class_count: int, attended: int) -> dict:
+        """What `/api/classes-log` answers with, summarised by the server's own
+        arithmetic over the log the write just made (P4) — so the toast is
+        tested against a figure the store produced, not one a test typed."""
+        events = [{"kind": "attended"}] * attended
+        return {"ok": True, "package": {
+            "id": "p1", "kind": kind, "class_count": class_count,
+            "summary": Store.summarize_package(
+                {"kind": kind, "class_count": class_count}, 1202.75, events)}}
+
+    def test_the_last_class_of_a_pack_says_where_the_row_went(self):
+        """The repaint that follows takes a spent pack out of the running list
+        and into 已结课 — a row disappearing from under her finger, with a
+        toast that says only 已记录, does not say where it went."""
+        state = self.run_handler(self.LOG_TAP, reply=self.logged("per_class", 2, 2))
+        self.assertEqual(state["toasts"], ["cls_logged · 2026-08-11 · cls_now_done"])
+
+    def test_a_class_with_others_left_does_not_claim_the_course_is_done(self):
+        """The suffix is the difference between the row moving and staying, so
+        it has to be wrong in both directions before it is worth anything."""
+        state = self.run_handler(self.LOG_TAP, reply=self.logged("per_class", 2, 1))
+        self.assertEqual(state["toasts"], ["cls_logged · 2026-08-11"])
+        # a month fee is never finished by its log, whatever it says
+        period = self.run_handler(self.log_tap("missed_school"),
+                                  reply=self.logged("period", 8, 0))
+        self.assertEqual(period["toasts"], ["cls_logged · 2026-08-11"])
+        # An answer whose shape surprises us — no package, or one with no
+        # summary — says nothing rather than throwing on the way to the toast.
+        # A throw here would skip refreshClasses AND the release, leaving the
+        # course locked after a write that succeeded.
+        for reply in ({"ok": True}, {"ok": True, "package": {"kind": "per_class"}}):
+            with self.subTest(reply=reply):
+                bare = self.run_handler(self.LOG_TAP, reply=reply)
+                self.assertEqual(bare["toasts"], ["cls_logged · 2026-08-11"])
+                self.assertGreaterEqual(bare["rendered"], 1, "no repaint was asked for")
+                self.assertEqual(bare["busy"], {"p1": False}, "the course stayed locked")
 
     def test_opening_the_date_picker_does_not_close_the_row(self):
         """The picker lives inside the row, and the row's own tap handler
@@ -3722,16 +3773,37 @@ class ClassArchivePartitionTests(unittest.TestCase):
 
     PORTAL = Path(__file__).resolve().parent.parent / "app" / "portal.html"
 
-    def package(self, pid, archived=False, kind="per_class", **over):
+    def package(self, pid, archived=False, kind="per_class", class_count=10,
+                attended=0, missed_school=0, missed_us=0, **over):
+        """A course with the class log a test asks for, and the summary the
+        SERVER would derive from it — `Store.summarize_package`, the one
+        implementation of this arithmetic (P4).
+
+        The previous fixture wrote `remaining` by hand beside an unrelated
+        `attended`, which is a state the server cannot produce: a test could
+        pin "0 left after 0 classes" and pass. That is the stub failure
+        LESSONS §3 keeps finding here, and this partition now reads the very
+        field it was free to invent.
+        """
+        events = [
+            {"id": f"e{pid}{i}", "date": f"2026-08-{i + 1:02d}", "kind": kind_,
+             "note": None, "logged_by": None}
+            for i, kind_ in enumerate(["attended"] * attended
+                                      + ["missed_school"] * missed_school
+                                      + ["missed_us"] * missed_us)
+        ]
+        # 2200 over 10 divides evenly; 2202.75 does not, and a cent that only
+        # appears in an uneven split is the money bug this repo keeps meeting
+        # (LESSONS §10). Nothing here asserts a figure — but the row renders
+        # them, so the fixture may as well be one the arithmetic can fail on.
+        amount = 2202.75
         p = {"id": pid, "name": "课" + pid, "period_label": None, "kind": kind,
-             "archived": archived, "class_count": 10, "events": [],
-             "expense": {"id": "x" + pid, "date": "2026-08-20", "amount": 2200.0,
+             "archived": archived, "class_count": class_count, "events": events,
+             "expense": {"id": "x" + pid, "date": "2026-08-20", "amount": amount,
                          "description": "pay " + pid, "category": "aden-sports",
                          "paid": True},
-             "summary": {"remaining": 10, "class_count": 10, "rate": 220.0, "used": 0,
-                         "overrun": 0, "remaining_amount": 2200.0, "owed": 0,
-                         "reclaimable": 0, "forfeited": 0, "owed_amount": 0.0,
-                         "reclaimable_amount": 0.0, "forfeited_amount": 0.0}}
+             "summary": Store.summarize_package(
+                 {"kind": kind, "class_count": class_count}, amount, events)}
         p.update(over)
         return p
 
@@ -3801,9 +3873,100 @@ console.log(nodes["classesBody"].innerHTML);
 
     def test_with_everything_finished_the_running_list_says_so_and_the_courses_survive(self):
         html = self.render([self.package("a", archived=True)])
-        self.assertIn("cls_none", html)
+        # the exact key, because "cls_none" is a prefix of "cls_none_running"
+        # and an `in` check passes whichever of the two the page chose
+        self.assertIn('<div class="empty">cls_none_running</div>', html)
         self.assertEqual(html.count('data-pkg="a"'), 1)
         self.assertIn('<details class="arch">', html)
+
+    def test_an_empty_tab_and_a_tab_of_finished_courses_do_not_say_the_same_thing(self):
+        """"还没有课程" under a list of finished courses is false — and the
+        term between packs now reaches it the moment the last one is spent,
+        which is how it got noticed."""
+        spent = self.render([self.package("a", class_count=2, attended=2)])
+        self.assertIn('<div class="empty">cls_none_running</div>', spent)
+        # a tab with no courses at all is a different line — renderClasses
+        # returns before the partition — and it still says 还没有课程
+        self.assertIn('<div class="empty">cls_none</div>', self.render([]))
+        self.assertNotIn("cls_none_running", self.render([]))
+
+    def test_a_pack_with_no_classes_left_is_finished_before_anyone_says_so(self):
+        """Her tab on 2026-09-20: two of seven courses were spent — 0/2 and
+        0/5, ¥0.00 left — sitting in the running list among the live ones
+        because 结课 had never been tapped. The class log already says which
+        is which, so nothing has to be tapped for it to be true."""
+        html = self.render([self.package("a", class_count=2, attended=2),
+                            self.package("b", class_count=10, attended=4)])
+        arch = html.index('<details class="arch"')
+        self.assertGreater(html.index('data-pkg="a"'), arch, "spent pack is still running")
+        self.assertLess(html.index('data-pkg="b"'), arch, "6 of 10 left, and it moved")
+        self.assertIn("1 cls_cls", html)                  # the header counts the running one
+        self.assertIn("cls_archived_sec</span><span>1</span>", html)
+
+    def test_unlogging_the_last_class_returns_the_course_to_the_running_list(self):
+        """Nothing is stored when a course moves, so nothing has to be undone.
+        Deleting a class logged by mistake is the whole repair — the same
+        course with one attendance fewer renders running again, which a flag
+        written on the way in would not have done."""
+        self.assertIn('<details class="arch"',
+                      self.render([self.package("a", class_count=2, attended=2)]))
+        back = self.render([self.package("a", class_count=2, attended=1)])
+        self.assertNotIn("details", back)
+        self.assertNotIn("cls_archived_sec", back)
+
+    def test_attending_more_classes_than_were_bought_is_still_finished(self):
+        """Overrun is a real thing here and `remaining` floors at 0. A pack at
+        3 of 2 is past spent, not back to running."""
+        html = self.render([self.package("a", class_count=2, attended=3)])
+        self.assertIn('<details class="arch"', html)
+        self.assertGreater(html.index('data-pkg="a"'), html.index('<details class="arch"'))
+
+    def test_a_month_fee_owing_nothing_is_a_month_going_fine_not_a_finished_one(self):
+        """A period package reads 0 owed / ¥0.00 on every month where nothing
+        was missed — including its first day, which is exactly when it must
+        stay in front of her. The calendar finishes it and the log cannot see
+        the calendar, so 结课 remains the only way it leaves (owner's call,
+        2026-09-20). Even a month missed end to end is a claim against the
+        school, not a retirement."""
+        for over in ({}, {"missed_school": 8}, {"missed_us": 8}):
+            with self.subTest(**(over or {"log": "empty"})):
+                html = self.render([self.package("a", kind="period", class_count=8,
+                                                 **over)])
+                self.assertNotIn("cls_archived_sec", html)
+                self.assertIn('data-pkg="a"', html)
+        # Two things keep a month fee out of that group, and only one of them
+        # is in portal.html: the server's period summary carries no
+        # `remaining` at all. Pin it here, because adding one would retire
+        # every month fee silently and this file would still be green.
+        self.assertNotIn("remaining", Store.summarize_package(
+            {"kind": "period", "class_count": 8}, 2202.75, []))
+
+    def test_the_finish_toggle_is_offered_only_where_it_would_move_the_row(self):
+        """A button that asks 它会移到「已结课」? about a course already sitting
+        in 已结课 — and then visibly does nothing — reads as broken. So a spent
+        pack shows neither half of the toggle, and every course whose group the
+        toggle WOULD change keeps it."""
+        spent = self.render([self.package("a", class_count=2, attended=2)], open_ids=["a"])
+        self.assertNotIn('data-c="archpkg"', spent)
+        self.assertNotIn('data-c="unarchpkg"', spent)
+        self.assertIn('data-c="editpkg"', spent)       # the rest of the row still works
+        self.assertIn('data-c="delpkg"', spent)
+        self.assertIn('data-c="attended"', spent)      # …including one more class
+        # archived AND spent: 恢复 could not bring it back either, so it is not
+        # offered — the flag is the owner's to clear from the MCP side
+        both = self.render([self.package("a", class_count=2, attended=2, archived=True)],
+                           open_ids=["a"])
+        self.assertNotIn('data-c="unarchpkg"', both)
+        self.assertNotIn('data-c="archpkg"', both)
+        # a month fee is never spent by its log, so it always keeps 结课 …
+        period = self.render([self.package("a", kind="period", class_count=8,
+                                           missed_school=8)], open_ids=["a"])
+        self.assertIn('data-c="archpkg"', period)
+        # … and a pack with classes left keeps 恢复, so a course finished by
+        # mistake is never stuck in the group (LESSONS §12)
+        mistake = self.render([self.package("a", attended=1, archived=True)],
+                              open_ids=["a"])
+        self.assertIn('data-c="unarchpkg"', mistake)
 
     def test_the_management_row_offers_finish_or_restore_by_state(self):
         live = self.render([self.package("a")], open_ids=["a"])

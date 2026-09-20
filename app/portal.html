@@ -329,7 +329,7 @@
       cls_rate:"每节", cls_left:"剩", cls_used:"已上", cls_cls:"节",
       cls_owed:"欠我们", cls_reclaim:"可退", cls_forfeit:"自己缺",
       cls_attend:"✓ 上了", cls_cancel:"停课", cls_skip:"没去",
-      cls_none:"还没有课程",
+      cls_none:"还没有课程", cls_none_running:"没有在上的课程",
       // true whether the ledger is empty, whether nothing is in the two course
       // categories, or whether every course payment is already tracked — and it
       // names the filter, so the dead end explains itself
@@ -339,6 +339,9 @@
       cls_logged:"已记录", cls_capped:"超出上限", cls_sec:"课程", cls_of:"共",
       cls_edit:"编辑", cls_archive:"结课", cls_unarchive:"恢复",
       cls_archived_sec:"已结课", cls_confirm_archive:"这个课程已经结束了？它会移到「已结课」。",
+      // the last class of a pack: say where the row went, since the
+      // repaint takes it out of the running list
+      cls_now_done:"上完了，移到「已结课」",
       cls_class_count:"课时数", cls_course:"课程",
       // refunds — money that came BACK on a paid row. The row keeps its
       // original figure; the refund is its own record with its own date
@@ -393,13 +396,14 @@
       cls_rate:"each", cls_left:"left", cls_used:"attended", cls_cls:"classes",
       cls_owed:"owed to us", cls_reclaim:"reclaimable", cls_forfeit:"we skipped",
       cls_attend:"✓ Attended", cls_cancel:"Cancelled", cls_skip:"We skipped",
-      cls_none:"No courses yet",
+      cls_none:"No courses yet", cls_none_running:"Nothing running right now",
       cls_no_payment:"No payments to link — only Aden · education / Aden · sports are shown",
       cls_confirm_del:"Delete this course and its class log?",
       cls_confirm_unlog:"Delete this class record?", cls_over:"over",
       cls_logged:"Logged", cls_capped:"capped, over by", cls_sec:"Courses", cls_of:"of",
       cls_edit:"Edit", cls_archive:"Finished", cls_unarchive:"Restore",
       cls_archived_sec:"Finished courses",
+      cls_now_done:"all used up — moved to Finished courses",
       cls_confirm_archive:"Is this course finished? It moves to \"Finished courses\".",
       cls_class_count:"Classes", cls_course:"Course",
       refund:"Refund", refund_title:"Record a refund", refund_amt:"Refund amount (¥)",
@@ -1340,6 +1344,22 @@
     };
   }
 
+  // A pack with no classes left is finished, whether or not anyone tapped
+  // 结课 — its own log says so. Read, never written: copying this into the
+  // `archived` flag would make two things answer one question and let them
+  // disagree (LESSONS §5), and an automatic write inside the class log is the
+  // shape BACKLOG §6 exists to keep out. So it decides only where the row is
+  // drawn; deleting a wrongly-logged class puts the course straight back in
+  // the running list, because nothing was stored to undo.
+  //
+  // per_class ONLY. A period fee owes nothing back when nothing was missed,
+  // so ¥0 owed is the NORMAL state of a month that is going fine, not a
+  // finished one — the calendar ends it and the log cannot see the calendar.
+  // 结课 stays the only way a month fee leaves the running list.
+  function clsSpent(p) {
+    return p.kind === "per_class" && p.summary.remaining === 0;
+  }
+
   function renderClasses() {
     var sel = $("clsExpense");
     // a row tap re-renders the whole tab, and rebuilding the options resets
@@ -1385,9 +1405,12 @@
     // archived rows, and nothing could set the flag); now that she can retire
     // one, it has to go SOMEWHERE she can open, or the first course she
     // archives by mistake is gone with no way back (LESSONS §12).
+    // Finished is two things and they are not the same claim: the flag, which
+    // someone set, and a spent pack, which the class log settles on its own.
+    // Either one puts the course in 已结课; neither hides it.
     var live = [], done = [];
     packages.forEach(function (p, idx) {
-      (p.archived ? done : live).push(pkgRowHtml(p, titles[idx]));
+      ((p.archived || clsSpent(p)) ? done : live).push(pkgRowHtml(p, titles[idx]));
     });
     // Every tap re-renders the whole tab, and a rebuilt <details> is closed —
     // so tapping a finished course collapsed the group it sits in, under her
@@ -1397,7 +1420,13 @@
     var archOpen = !!(prevArch && prevArch.open);
     body.innerHTML = '<div class="sec"><h2>' + esc(t("cls_sec")) + "</h2><span class='tot'>" +
       esc(live.length + " " + t("cls_cls")) + "</span></div><div class='list'>" +
-      (live.length ? live.join("") : '<div class="empty">' + esc(t("cls_none")) + "</div>") +
+      // NOT "还没有课程", which would be false under a list of finished
+      // courses — and a term between packs reaches this the moment the
+      // last pack is spent. Every course is in one of the two lists, so
+      // an empty running list here means they are all finished; a tab
+      // with no courses at all returned above, saying cls_none.
+      (live.length ? live.join("")
+        : '<div class="empty">' + esc(t("cls_none_running")) + "</div>") +
       "</div>" +
       (done.length
         ? '<details class="arch"' + (archOpen ? ' open=""' : "") + '><summary><span>' +
@@ -1494,9 +1523,17 @@
           // row do not fit a phone, and these three are the rare ones
           '<div class="btns"' + (isOpen ? "" : ' hidden=""') + ">" +
             '<button data-c="editpkg">' + esc(t("cls_edit")) + "</button>" +
-            (p.archived
-              ? '<button data-c="unarchpkg">' + esc(t("cls_unarchive")) + "</button>"
-              : '<button data-c="archpkg">' + esc(t("cls_archive")) + "</button>") +
+            // …and the finish/restore toggle only where it would actually move
+            // the row. A spent pack is in 已结课 by its own log: 结课 there
+            // would ask "它会移到「已结课」?" about a course already sitting in
+            // it, and 恢复 could not bring it back — a confirm box followed by
+            // nothing visible, which reads as a broken button. A course the
+            // log cannot judge — a month fee, a pack dropped half-used — keeps
+            // both, so nothing archived by mistake is stuck there (LESSONS §12).
+            (clsSpent(p) ? ""
+              : p.archived
+                ? '<button data-c="unarchpkg">' + esc(t("cls_unarchive")) + "</button>"
+                : '<button data-c="archpkg">' + esc(t("cls_archive")) + "</button>") +
             '<button class="del" data-c="delpkg">' + esc(t("del")) + "</button>" +
           "</div>" +
           (isOpen && clsEdit[p.id] ? clsEditHtml(p) : "") +
@@ -1906,7 +1943,7 @@
     // duplicate class is neither. Safe release needs server-side idempotency
     // (BACKLOG §6), not a guess about whether the write landed.
     api("classes-log", {package_id:id, kind:act, date:d})
-      .then(function () {
+      .then(function (j) {
         // Back to today, so the next tap cannot silently reuse this one's
         // date — but only if the box still shows what we just logged. A slow
         // request outlives its own context and she may have picked since;
@@ -1918,7 +1955,15 @@
           delete clsDates[id];
           if (live) live.value = todayStr();
         }
-        toast(t("cls_logged") + " · " + d); refreshClasses();
+        // The repaint that follows moves a pack whose last class this was
+        // into 已结课, and a row disappearing from under her finger with a
+        // toast that says only "已记录" does not explain where it went. Read
+        // from the WRITE'S OWN answer — the same summary the next render will
+        // partition on — rather than from a count kept on this side.
+        toast(t("cls_logged") + " · " + d +
+              (j && j.package && j.package.summary && clsSpent(j.package)
+               ? " · " + t("cls_now_done") : ""));
+        refreshClasses();
       })
       .then(releaseCourse)
       .catch(function (e) {

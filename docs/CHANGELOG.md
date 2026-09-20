@@ -5,7 +5,76 @@ to a release entry when a chunk set ships.
 
 ## [Unreleased]
 
-Nothing pending.
+**Not deployed.** Portal-only; no schema, no store, no MCP change.
+
+Asked for from her tab on 2026-09-20: seven courses, and three of them read
+0 left / ¥0.00. 结课 shipped in v0.13.0 and had never been tapped — a finished
+course only leaves the running list if someone remembers to retire it, and
+nobody does that on a phone.
+
+### Changed
+- **A per-class pack with no classes left renders in 已结课 on its own.** The
+  class log already settles the question, so the portal partitions on
+  `archived || clsSpent(p)` and the flag stops being the only answer.
+  **Derived, never written:** copying it into `archived` would make two
+  things answer one question and let them disagree (LESSONS §5), and a write
+  fired from inside the class log is the shape BACKLOG §6 exists to keep out.
+  So deleting a class logged by mistake puts the course straight back in the
+  running list, because nothing was stored to undo — and an owner who
+  archives it by MCP changes nothing she can see.
+  **per_class only, by the owner's call:** a month fee reads 0 owed / ¥0.00
+  on every month where nothing was missed, including its first day, so its
+  log cannot tell a finished month from one going fine. The calendar ends it
+  and the portal cannot read the calendar; 结课 stays the only way one
+  retires. Pinned in both directions, including a month missed end to end.
+- **结课 / 恢复 are drawn only where they would move the row.** A spent pack
+  is in 已结课 by its own log: 结课 there would ask "它会移到「已结课」?" about
+  a course already sitting in it, and 恢复 could not bring it back — a
+  confirm box followed by nothing visible reads as a broken button. Every
+  course whose group the toggle *would* change keeps it, so a course finished
+  by mistake is still never stuck there (LESSONS §12), and the rest of the
+  row — 编辑, 删除, one more class — is untouched.
+
+### Fixed
+- **An empty running list no longer says 还没有课程 over a list of finished
+  courses.** It reads 没有在上的课程 / *Nothing running right now*; a tab with
+  no courses at all still says 还没有课程. Pre-existing since v0.13.0 and
+  reachable only by archiving everything — a term between packs now reaches
+  it by itself, which is how it was noticed. The first attempt wrote the
+  choice as a ternary on `done.length`; the mutation sweep showed the
+  false arm was unreachable (every course is in one of the two lists, and a
+  tab with none returns earlier), so it is one string, not a branch.
+
+### Added
+- **The log toast says when that was the last class**: 已记录 · 2026-09-20 ·
+  上完了，移到「已结课」. The repaint takes the row out of the running list
+  under her finger, and a toast that says only 已记录 does not say where it
+  went. The flag is read from the write's own answer — the same summary the
+  next render partitions on — so the toast and the row cannot disagree.
+
+### Tests
+- Eight guards (506 total), each proved to fail before it was trusted:
+  fourteen mutations of the partition, the toggle rule, the toast and the
+  empty-list line, every one caught by a target asserted to pass first (P5,
+  LESSONS §4). One survivor was real and is the `### Fixed` note above.
+- An existing guard was tightened in passing: `assertIn("cls_none", …)`
+  cannot fail once `cls_none_running` exists, since one key is a prefix of
+  the other. It asserts the whole element now.
+- `ClassArchivePartitionTests` no longer writes `remaining` by hand beside an
+  unrelated `attended` — its summaries come from `Store.summarize_package`
+  over a real event log, so the fixture can no longer express a state the
+  server cannot produce (LESSONS §3), and it is the field the new partition
+  reads. Its month-fee guard also pins the store end: the period summary
+  carries no `remaining` at all, and adding one would retire every month fee
+  silently.
+- The class-handler harness now takes the body `api()` resolves with, so the
+  toast is tested against what the server would actually answer, and it runs
+  the real `clsSpent` rather than a stub of the function under test.
+
+**Deliberately not done.** MCP `classes_list` still lists a spent course as
+running — it says `0/2 classes left, ¥0.00`, which is legible, and the owner
+has `classes_update(archived=true)` when he wants one gone for good. Making
+the flag automatic anywhere is the thing this change exists to avoid.
 
 ## [0.13.1] — 2026-09-05
 
