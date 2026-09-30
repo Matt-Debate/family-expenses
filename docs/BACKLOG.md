@@ -1,17 +1,17 @@
 # Backlog — deferred work
 
 
-### MCP OAuth rollout — owner-requested 2026-09-30, pending
+### MCP OAuth rollout — deployed 2026-09-30, remaining client acceptance
 
-Local v0.14.0 implements the resource-server boundary; it does not establish
-live Auth0 or ChatGPT compatibility. Adversarial review and same-reviewer fix
-verification are complete: no auth bypass or remaining local security blocker.
-Remaining gates: approved household subject/permission policy, approved API/client
-registration and PKCE configuration, resource-to-audience verification in the
-shared tenant, platform log hygiene, coordinated family reconnection, approved
-deployment, real ChatGPT consent, anonymous denial and authorized household read.
-See RUNBOOK §9. Never resolve failures by restoring anonymous data access.
-
+Reviewed v0.14.0 is deployed to `family-expenses-00017-ktm`. Approved Auth0 API,
+household permissions, user-delegated ChatGPT client grant, runtime membership and
+log hygiene are configured. Live discovery and anonymous denial were verified.
+The owner reports successful web OAuth sign-in/consent and household read; the
+parent independently reports a connected read with the unchanged 38-record baseline.
+Remaining checks: desktop/iOS pickup, wife reconnection, and live write/step-up
+authorization without test mutations of real household data or links.
+See RUNBOOK §9.5 for exact configuration and evidence. Never restore anonymous
+access to resolve another client's reconnection failure.
 
 Known, deliberately-not-done items. Nothing here blocks daily use — the ledger
 is live and in use by two people since 2026-08-11. Each entry says why it was

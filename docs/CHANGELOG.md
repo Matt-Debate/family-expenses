@@ -1,12 +1,15 @@
 # Changelog — Family Expenses
 
 
-## v0.14.0 — MCP OAuth resource server (2026-09-30, local only)
+## v0.14.0 — MCP OAuth resource server (2026-09-30, deployed)
 
-Owner explicitly supersedes the old anonymous-MCP requirement for implementation
-and migration planning. **Not deployed; real ChatGPT OAuth remains unverified.**
-Adversarial review and same-reviewer fix verification complete; no remaining
-local security blocker. Owner-approved Auth0 / Cloud Run setup remains pending.
+Owner approved the Auth0 setup and production cutover to revision
+`family-expenses-00017-ktm` using reviewed release `f828530`. Anonymous access
+is denied. The owner reports successful ChatGPT web OAuth sign-in/consent and a
+household read; the parent independently reports a connected read preserving the
+38-record baseline. Adversarial review and fix verification are complete.
+Desktop/iOS pickup, wife reconnection and live write/step-up acceptance remain
+pending; no live ledger or link mutations were used to test authentication.
 
 - Mandatory RS256 Auth0 access tokens, exact issuer and resource audience,
   expiry/not-before validation, approved subjects and consent/RBAC/local policy

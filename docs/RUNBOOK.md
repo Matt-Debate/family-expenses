@@ -25,8 +25,9 @@ The script permanently pins service `family-expenses` in
 current clean Git SHA, and binds `DATABASE_URL` from
 `family-expenses-database-url`. Production refuses to boot on SQLite.
 MCP OAuth is mandatory in this implementation. Production will not start until
-§9 is configured. This is a planned breaking MCP cutover, pending approval;
-existing production clients still use the previous anonymous revision.
+§9 is configured. The owner-approved cutover completed on 2026-09-30 to
+revision `family-expenses-00017-ktm`. Anonymous MCP requests are denied;
+old no-auth clients require deliberate OAuth reconnection (see §9.5).
 `APP_TZ` stays unchanged. Keep service name, region, URL, `/mcp`, all portal
 paths and live links stable. Preserve the existing portal Auth0 client,
 email/password database connection, allowlist and SESSION_SECRET binding.
@@ -366,46 +367,81 @@ for this auth migration: it creates/mutates live rows and portal links. Use only
 read-only live acceptance above; the isolated suite covers write behavior.
 
 
-### 9.5 Existing Family Expenses personal plugin — reconnection handoff
+### 9.5 Family Expenses personal plugin — completed web reconnection
 
-This is the existing personal plugin that already works on ChatGPT web and
-appears on iOS. No new local plugin package, icon work or separate iOS install is
-needed. These steps describe the **future approved rollout**, not current live
-behavior: this code has not been deployed and no real OAuth connection was verified.
+The owner manually removed the old no-auth app definition because its authentication
+mode could not be edited in place. Reinstallation alone retained the old mode.
+A new **Family Expenses** personal plugin was created with the existing saved
+icon, description and server URL. The old plugin ID must not be reused as the new
+connection identity. The recreated plugin visible in Safari is
+`plugin_asdk_app_6abc962039d88191bb3cc56ff8670715`. No additional local
+plugin package or iOS install is needed.
 
-1. On ChatGPT web, open the existing **Family Expenses** personal plugin's MCP
-   management/configuration page. Keep its MCP URL exactly
-   `https://family-expenses-bejtu5m47a-as.a.run.app/mcp`; preserve the existing
-   plugin identity. Select OAuth for that existing server connection once the
-   approved server/Auth0 configuration is ready. Do not create an anonymous
-   duplicate or paste an access token/static secret.
-2. Read the exact callback URI displayed for this connection. Use that exact
-   value in the separately approved Auth0 MCP client, not the portal callback.
-   The selected pre-registration flow needs the new MCP **client ID**, and the
-   client secret only if its configured token-auth method requires one. Enter
-   secrets directly in the ChatGPT secure setup UI. Neither this checkout nor
-   these instructions contain a real client ID/secret or guessed callback URI.
-   If the management UI offers only CIMD/DCR, stop and follow §9.2's approved
-   provider/client registration decision rather than selecting a guessed mode.
-3. Save/reconnect the existing OAuth connection and sign in with the approved
-   household's **existing Auth0 email/password** login. Complete read-scope consent.
-   Do not change the portal password, account, allowlist or session secret.
-4. Verify the existing plugin can read the household ledger on web. Verify write
-   and owner-only link scope escalation using the isolated fixture environment
-   first; on production do not add/delete expense rows or mint/revoke links just
-   to test auth. Local tests prove denials, not real ChatGPT consent behavior.
-5. Check the existing plugin on iOS under the same ChatGPT account. Whether the
-   linked OAuth connection is reused there is a live acceptance check; follow any
-   secure sign-in/consent prompt rather than installing a second local package.
-   Keep the phone portal bookmark unchanged.
+Verified non-secret settings for this connection:
 
-Before exact live instructions can be finalized, record these **non-secret**
-configuration facts: approved API identifier (the exact MCP URL), Auth0 issuer,
-MCP client ID, selected registration/token-auth method, the displayed exact
-callback, enabled S256 discovery, verified `resource`/audience behavior,
-approved subject-to-permission policy, pinned policy secret version (reference
-only), deployed protected revision, and successful web/iOS acceptance evidence.
-Passwords, client secrets and access/refresh tokens belong only in secure UIs.
+| Setting | Value |
+|---|---|
+| MCP server / API audience / resource | `https://family-expenses-bejtu5m47a-as.a.run.app/mcp` |
+| Issuer | `https://work-os.jp.auth0.com/` |
+| Registration method | User-Defined OAuth Client |
+| Existing Auth0 application | `mcp-chatgpt-dev` |
+| Public client ID | `9hsejf2SLr6OJD086vUkWCPhYgjJKFQn` |
+| Token endpoint authentication | `none`; no client secret required |
+| Displayed callback | `https://chatgpt.com/connector/oauth/kwT-xa2yfsOd` |
+| Base scopes | `expenses:read`, `expenses:write`, `expenses:links` |
+| User-delegated grant | `cgr_yeLmVwcDyx8rHVba`, exact three scopes, `subject_type=user`, `allow_all_scopes=false` |
+
+Base scopes accept one value per line or comma-separated values. The client-ID
+field contains only the public client ID. The new callback was added while
+preserving both existing Auth0 callbacks. A future recreation can display a
+different callback; verify its exact value and obtain approval before adding it.
+Do not guess a callback, alter tenant default audience or create a machine grant.
+
+Sign in using the approved household's existing Auth0 email/password account and
+complete consent securely. Tokens, passwords and client secrets must never be
+copied into chat, logs or this runbook. Each caller remains restricted by the
+intersection of requested scopes, Auth0 permissions and runtime membership:
+Matt has read/write/link permissions; wife has read/write only.
+
+On 2026-09-30 the owner reported successful new-plugin creation, Auth0 sign-in and
+consent, and a read-only expense summary on ChatGPT web. This browser success was
+user-reported rather than independently observed by this session. At 04:58:35 UTC
+(12:58:35 Asia/Shanghai), the parent coordinator independently reported a successful
+connected `expenses_list({})` read: 38 records matched the previous baseline,
+with no new records or writes. Tools reappeared and watcher access was restored.
+No ledger contents or tokens were retained as acceptance evidence.
+
+Desktop and iOS pickup remain acceptance checks. Use the same ChatGPT account,
+refresh the app and follow any secure sign-in prompt; do not assume the old plugin
+identity survives. Keep the phone portal bookmark unchanged. Live write and link
+authorization were not exercised by mutating the household ledger or links.
+The isolated test suite covers those permission boundaries; actual step-up consent
+is still unverified because this owner connection requests all three base scopes.
+
+### 9.5.1 Approved production rollout evidence
+
+- Reviewed release: `f8285300d84e6d16cc0efd2a155ea474755d6b36`,
+  branch `codex/mcp-oauth-local`; no merge required for the manual deployment.
+- Cloud Build `40961b99-8382-498b-a47c-ceb059cbf362` succeeded.
+  Deployed immutable image:
+  `gcr.io/work-dashboards/family-expenses@sha256:5372d2d385ff58e9056d6eed71ff7f7e5bfa31cd228acbb10c37e85d2302f214`.
+- Cloud Run `family-expenses-00017-ktm` serves 100% traffic in
+  `asia-southeast1`. Original service URL, portal settings, secret bindings,
+  service account, household data and live links were preserved.
+- Runtime membership uses `family-expenses-mcp-members:1`. Only the existing
+  service account was granted access to that new secret.
+- Auth0 API `6abc839885659cb0080b4f34` uses RS256, both token lifetimes
+  900 seconds, RBAC and permissions in tokens, three explicit scopes, and
+  explicit user consent. Machine access is denied. Owner-approved household API
+  permissions and runtime membership were verified.
+- Scoped Cloud Logging exclusion `family-expenses-credential-urls` protects
+  credential-bearing `/t/` and `/callback` request URLs; other logging remains.
+- Independent live checks returned healthy service and OAuth discovery, and
+  401 bearer challenges for anonymous and invalid-token MCP requests.
+- Real web OAuth plus authorized household read is now established by the
+  reported acceptance evidence above. Desktop/iOS propagation, wife reconnection
+  and live write/step-up behavior remain pending; do not restore anonymous access
+  if another client needs reconnection.
 
 ### 9.6 Reproducible runtime and review evidence
 
