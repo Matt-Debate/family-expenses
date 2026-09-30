@@ -414,7 +414,8 @@ No ledger contents or tokens were retained as acceptance evidence.
 The owner subsequently reported desktop Connected status and explicitly tested
 one MCP add/mark-paid operation after reconnect; the parent verified exactly one
 matching paid test entry. No assistant test writes or duplicate retry were performed.
-iOS pickup and wife reconnection remain acceptance checks. Use the same ChatGPT account,
+The owner confirms browser clients work; this is user-reported acceptance. There
+is no dedicated iOS app requiring a separate rollout gate. Use the same ChatGPT account,
 refresh the app and follow any secure sign-in prompt; do not assume the old plugin
 identity survives. Keep the phone portal bookmark unchanged. Owner-requested live write authorization is now verified by that separate user test;
 link-management authorization was not exercised by mutating live links.
@@ -442,8 +443,8 @@ is still unverified because this owner connection requests all three base scopes
 - Independent live checks returned healthy service and OAuth discovery, and
   401 bearer challenges for anonymous and invalid-token MCP requests.
 - Real web OAuth plus authorized household read is now established by the
-  reported acceptance evidence above. iOS propagation, wife reconnection
-  and live link/step-up behavior remain pending; do not restore anonymous access
+  reported acceptance evidence above. browser-client acceptance is owner-reported. Live link/step-up behavior
+  remains untested; do not restore anonymous access
   if another client needs reconnection.
 
 ### 9.5.2 Refresh renewal correction and acceptance
@@ -472,6 +473,12 @@ Auth0 independently recorded successful refresh exchange `sertft` at
 No new Family Expenses code exchange appeared between those events. The
 21-minute interval and successful refresh establish renewal beyond the original
 900-second lifetime. Read/renewal acceptance required no further ledger mutation.
+The owner confirms browser clients work and clarified that there is no dedicated
+iOS app. The owner subsequently cleaned up the user-created test entries. Browser
+acceptance and cleanup are user-reported; provider refresh and the parent connected
+read are independently verified evidence. No further link/step-up probes were
+requested. Those untested behaviors are documented limits, not open rollout gates.
+No additional persistent monitoring was created; the existing expense watcher remains.
 
 For another existing connection that still expires, reconnect it once after the
 offline-access change and complete consent securely. Do not delete/recreate the

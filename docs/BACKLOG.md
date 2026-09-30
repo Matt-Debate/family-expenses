@@ -1,7 +1,7 @@
 # Backlog — deferred work
 
 
-### MCP OAuth rollout — deployed 2026-09-30, remaining client acceptance
+### MCP OAuth rollout — deployed and accepted 2026-09-30
 
 Reviewed v0.14.0 is deployed to `family-expenses-00017-ktm`. Approved Auth0 API,
 household permissions, user-delegated ChatGPT client grant, runtime membership and
@@ -10,8 +10,11 @@ The owner reports successful web OAuth sign-in/consent and household read; the
 parent independently reports a connected read with the unchanged 38-record baseline.
 Desktop Connected status and one owner-requested paid MCP test entry were
 confirmed. API-only offline access was approved; a read beyond 20 minutes and
-exact-audience Auth0 refresh event confirm automatic renewal. Remaining checks:
-iOS pickup, wife reconnection, and live link/step-up authorization. The shared
+exact-audience Auth0 refresh event confirm automatic renewal. The owner confirms
+browser clients work and that no dedicated iOS app exists; these are not open
+rollout blockers. User-created test entries were cleaned up by the owner.
+Link/step-up-specific behavior remains untested, with no additional probes
+requested. The shared
 client retains the disclosed non-expiring, non-rotating refresh policy; changing
 it requires approval and coordination with WorkOS.
 See RUNBOOK §9.5 for exact configuration and evidence. Never restore anonymous
