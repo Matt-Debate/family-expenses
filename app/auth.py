@@ -12,8 +12,8 @@ WHAT THIS DOES NOT CHANGE (FEATURE_CONTRACT §5.1):
   * ``/t/<token>`` stays the portal path and the token still identifies the
     household. OAuth adds *who you are* on top of *which ledger*; it does not
     replace the link.
-  * ``/mcp`` is untouched. ``MCP_SECRET`` stays unset. A connected MCP client
-    never sees a login.
+  * ``/mcp`` is untouched. MCP has an independent OAuth bearer-token policy
+    in app/mcp_auth.py; portal cookies never grant MCP access.
 
 OFF BY DEFAULT. ``is_enabled()`` is false unless every required env var is set,
 mirroring work-dashboards' ``VITE_AUTH_REQUIRED`` gate. With them unset the

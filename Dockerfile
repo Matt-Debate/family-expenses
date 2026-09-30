@@ -5,9 +5,9 @@
 # (the portal is one self-contained HTML file served by the app).
 #
 # Deploy the clean, SHA-pinned image with scripts/deploy.sh. The script binds
-# DATABASE_URL from Secret Manager and deliberately leaves MCP_SECRET unset.
+# MCP member policy from a pinned Secret Manager version; existing bindings stay.
 
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:e41613d42d4891e4930f79523f93f81bbc7632584ec65e36ab055f41a800b41e
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -15,8 +15,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /family-expenses
 
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install -r /tmp/requirements.txt
+COPY requirements.lock /tmp/requirements.lock
+RUN pip install -r /tmp/requirements.lock
 
 COPY app/ /family-expenses/app/
 COPY db/ /family-expenses/db/

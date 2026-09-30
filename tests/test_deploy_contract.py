@@ -24,38 +24,26 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertIn("--project=work-dashboards", output)
         self.assertIn("--region=asia-southeast1", output)
         self.assertIn("family-expenses", output)
-        self.assertIn("family-expenses-database-url", output)
-        self.assertIn("--set-secrets=DATABASE_URL=", output)
+        self.assertIn("--update-secrets=MCP_MEMBERS_JSON=", output)
+        self.assertIn("family-expenses-mcp-members", output)
         self.assertIn("--min-instances=0", output)
         self.assertNotIn("MCP_SECRET", output)
         self.assertNotIn("work-dashboards-database", output)
         self.assertRegex(output, r"family-expenses:[0-9a-f]{7,40}")
 
-    def test_portal_oauth_is_wired_without_touching_the_mcp_posture(self):
-        """Portal OAuth gates the PORTAL only. /mcp must stay header-free."""
+    def test_auth_cutover_preserves_existing_portal_configuration(self):
         result = subprocess.run(
             ["bash", str(DEPLOY), "--dry-run", "--allow-dirty"],
             cwd=ROOT, check=True, capture_output=True, text=True,
         )
-        output = result.stdout
-        # secrets arrive via Secret Manager, never as literal env values
-        self.assertIn("AUTH0_CLIENT_SECRET=family-expenses-auth0-client-secret", output)
-        self.assertIn("SESSION_SECRET=family-expenses-session-secret", output)
-        self.assertIn("AUTH0_DOMAIN=work-os.jp.auth0.com", output)
-        self.assertIn("PORTAL_BASE_URL=", output)
-        # the allowlist must never ship empty-but-present: that is the open-door
-        # config, and it is far easier to introduce here than to notice later
-        self.assertRegex(output, r"PORTAL_ALLOWED_EMAILS=[^~\"\s]+@")
-        # A multi-email allowlist contains commas, and --set-env-vars is
-        # comma-delimited by default — gcloud would silently read the second
-        # address as a whole new env var. The ^~^ prefix rebinds the delimiter.
-        # --dry-run prints commands printf %q-escaped, so drop the backslashes
-        # before matching: the escaping is display-only, not part of the argv.
-        unescaped = output.replace("\\", "")
-        self.assertIn("--set-env-vars=^~^", unescaped)
-        self.assertIn("PORTAL_ALLOWED_EMAILS=matthewfarm@gmail.com,", unescaped)
-        # A8: enabling portal login must not drag the MCP behind a header
-        self.assertNotIn("MCP_SECRET", output)
+        output = result.stdout.replace("\\", "")
+        self.assertIn("--update-env-vars=^~^MCP_AUTH_ISSUER=https://work-os.jp.auth0.com/", output)
+        self.assertIn("MCP_RESOURCE_URL=https://family-expenses-bejtu5m47a-as.a.run.app/mcp", output)
+        self.assertIn("APPROVED_VERSION_REQUIRED", output)
+        for forbidden in ("--set-env-vars", "--set-secrets", "SESSION_SECRET=",
+                          "AUTH0_CLIENT_SECRET=", "PORTAL_ALLOWED_EMAILS=",
+                          "AUTH0_CLIENT_ID=", "MCP_SECRET"):
+            self.assertNotIn(forbidden, output)
 
     def test_cloud_build_requires_explicit_commit_sha_and_no_latest_tag(self):
         config = CLOUD_BUILD.read_text(encoding="utf-8")

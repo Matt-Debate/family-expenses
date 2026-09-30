@@ -18,11 +18,10 @@ Built to replace free-text WeChat messages — not a business system.
   built for casual speech (fuzzy targeting, coached errors, bilingual
   triggers) plus 记账/对账/修复 persona prompts — design rationale in
   `docs/MCP_DESIGN.md`.
-- **Access** — deliberately minimal, matching the owner's threat model: the
-  portal link is a random 64-hex URL that **never expires** (the holder never
-  renews anything; revocation is the kill switch), and the MCP endpoint is
-  open unless `MCP_SECRET` is set. Nothing here is sensitive beyond a
-  household ledger.
+- **Access** — portal links keep their existing lifetime and portal Auth0 login.
+  MCP requires OAuth bearer tokens, an approved Auth0 subject and explicit
+  read/write/link-management permissions. The local implementation is ready
+  for review; live OAuth rollout and family reconnection remain pending approval.
 
 ## Repository layout
 
@@ -37,8 +36,8 @@ Built to replace free-text WeChat messages — not a business system.
 ## Quick start
 
 ```bash
-pip install -r requirements.txt
-python3 -m unittest discover -s tests        # 498 tests, sqlite, no DB server
+pip install -r requirements.lock
+python3 -m unittest discover -s tests        # 519 tests, sqlite, no DB server
 python3 -m app.main                          # http://localhost:8080
 python3 scripts/mint_link.py --label wife --base-url http://localhost:8080
 ```
@@ -51,6 +50,6 @@ Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
 **v0.13.0** in the repo; **in daily household use since 2026-08-11** on Cloud
 Run + Neon (the deployed revision is recorded in `docs/FEATURE_CONTRACT.md`).
 Four-tab portal behind Auth0 login with refunds and course editing on her
-side; an 18-tool MCP, open and header-free, on the owner's. Version history in
+side; an 18-tool MCP with a locally implemented OAuth boundary, on the owner's. Version history in
 `docs/CHANGELOG.md`; known deferred issues in `docs/BACKLOG.md`.
 Default branch: `main`.

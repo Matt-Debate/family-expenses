@@ -2,12 +2,12 @@
 
 Layout:
   GET  /health, /healthz, /t/<token>, POST /api/* — portal/API
-  /mcp                                     — operator MCP (bearer-secret auth)
+  /mcp                                     — household MCP (OAuth bearer auth)
 
 Config (env):
   DATABASE_URL  postgres://… (Neon) — falls back to a local sqlite file
-  MCP_SECRET    optional: when set, /mcp requires the bearer header;
-                when unset, /mcp is open (owner-accepted threat model)
+  MCP_AUTH_ISSUER, MCP_RESOURCE_URL, MCP_MEMBERS_JSON — required MCP OAuth
+                configuration; missing production configuration refuses startup
   APP_TZ        household timezone for "today" defaults (default Asia/Shanghai)
   PORT, HOST    Cloud Run injects PORT (default 8080)
 
@@ -28,6 +28,10 @@ from .web import build_routes, session_middleware
 
 
 def build_asgi_app():
+    # Validate security configuration before connecting to or migrating the DB.
+    from .mcp_auth import AuthConfig
+    if os.environ.get("K_SERVICE"):
+        AuthConfig.from_env()
     db = Database()
     db.init()  # idempotent schema apply
     store = Store(db)
@@ -51,6 +55,7 @@ def main() -> None:
         host=os.environ.get("HOST", "0.0.0.0"),
         port=int(os.environ.get("PORT", "8080")),
         log_level="info",
+        access_log=False,  # portal URLs contain credentials; never log paths
     )
 
 

@@ -61,7 +61,7 @@ no arrays, no PG-only expressions.
 | `description` | TEXT | what it was |
 | `paid` | BOOLEAN NOT NULL DEFAULT FALSE | |
 | `paid_date` | TEXT | required iff `paid` (CHECK) |
-| `submitted_by` | TEXT | attribution, not auth. Portal writes are stamped server-side with the link's label and ignore any client value; MCP callers name the speaker |
+| `submitted_by` | TEXT | attribution, not auth. Portal writes are stamped server-side with the link's label and ignore any client value; MCP attribution comes from the approved authenticated subject |
 | `created_at` / `updated_at` | TEXT NOT NULL | app-managed UTC ISO |
 
 ### `expense_history` (append-only)
@@ -148,25 +148,23 @@ pattern, minus tenancy/scoping.
   switch). Bounded expiry remains available per token.
 - Every API request revalidates the token (revoked + expiry-if-set,
   fail-closed on unknown/garbage tokens).
-- **MCP gate is optional and OFF**: `MCP_SECRET` unset → open. Owner's risk
-  ranking (final, 2026-07-14): the dominant risk is a non-technical family
-  member being forced to reconnect/re-auth after a change — the app falls
-  into disuse and the build is blamed. Unauthorized ledger edits are a
-  lesser, recoverable risk (audit history + revocation); auth gets added
-  only if abuse actually happens, as a conscious trade.
+- **MCP OAuth is required** in the local v0.14.0 implementation: RS256 signature,
+  exact Auth0 issuer, exact `/mcp` audience, expiry and valid timestamps;
+  authenticated subject must appear in the independent household policy.
+  Permission is the intersection of consented scopes, Auth0 RBAC permissions,
+  and local member permissions. Portal cookies and MCP_SECRET cannot authorize
+  MCP. Missing production security configuration prevents startup.
 
 ### 5.1 Compatibility contract (highest-priority invariant)
-No change may require the portal link or a connected MCP client to be
-reconfigured. Frozen once a family member is connected:
-  * the service URL (same Cloud Run service name + region across deploys),
-  * the `/t/<token>` portal path and her minted token (never expire, never
-    casually revoked),
-  * the `/mcp` mount path,
-  * the no-auth-header posture (`MCP_SECRET` stays unset on any service her
-    app points at).
-Safe to change freely: portal UI, tool descriptions/additions, docs, schema
-additions. Renaming/removing tools is safe for connectivity (clients list
-tools dynamically) but wait for a natural moment.
+The owner explicitly superseded the old no-auth MCP requirement on 2026-09-30
+for implementation and migration planning. OAuth cutover requires separate
+approval and coordinated reconnection; see RUNBOOK §9. Still frozen:
+  * service URL (Cloud Run service name + region),
+  * `/t/<token>` path, existing live tokens and their lifetime,
+  * `/mcp` mount path, portal email/password login, existing session secret and
+    portal allowlists, and household data.
+Safe to change freely: portal UI, tool descriptions/additions, docs, additive
+schema changes. No anonymous compatibility route may expose protected data.
 
 ## 6. API contract (portal)
 
@@ -301,7 +299,8 @@ Claude Design (Fable), v0.7.0: a typographic ledger on warm paper.
 - **A7** Single casual utterances (中文 or EN) — add with spoken amount and no
   date, mark-paid by description — succeed via MCP without ids; ambiguous
   phrases return candidates rather than acting on a guess.
-- **A8** No release may require re-authentication, reconnection, or
+- **A8** Except for the owner-approved MCP OAuth migration (RUNBOOK §9), no
+  release may require re-authentication, reconnection, or
   reconfiguration by a link/connector holder (§5.1). Zero-credential
   operation is permanent unless the owner explicitly trades it away. A warm
   service must recover its stale pooled Postgres connection on the first

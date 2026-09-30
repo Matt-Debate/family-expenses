@@ -34,20 +34,18 @@ that cost the most: **a fix is not a verified state** (five of six fix waves in
 v0.11.0 introduced a defect of their own), and **a test stub more permissive
 than the real object cannot fail**.
 
-**P1 — The compatibility contract outranks every other consideration.**
-`docs/FEATURE_CONTRACT.md` §5.1 / A8: no change may force her to reconnect,
-re-auth, or reconfigure. Frozen: Cloud Run **service name + region** (URL
-stability), her `/t/<token>` path and token, the `/mcp` mount path, and the
-no-auth posture on `/mcp`. The dominant risk is disuse-by-friction, not ledger
-abuse. `CompatibilityContractTests` pin what is pinnable; respect the rest during
-ops. Freely changeable: portal UI, tools, docs, additive schema.
+**P1 — Preserve the compatibility contract.**
+The 2026-09-30 owner request supersedes the old anonymous MCP posture for
+implementation and migration planning only. MCP OAuth deployment and family
+reconnection require separate approval (RUNBOOK §9). Cloud Run URL/region,
+`/mcp`, portal paths, live links, household data, portal email/password login,
+SESSION_SECRET and portal allowlists remain protected.
 
-**P2 — The portal has a login; `/mcp` does not. Never conflate them.**
-The portal sits behind Auth0 (allowlist `PORTAL_ALLOWED_EMAILS`) and she depends
-on it: rotating `SESSION_SECRET` signs her out, changing `AUTH0_DOMAIN` or the
-client id forces re-authentication, removing her from the allowlist locks her out
-silently. `/mcp` is untouched by all of it and stays open and header-free.
-Putting a header on `/mcp` would breach P1; portal login does not.
+**P2 — Portal sessions and MCP authentication are independent.**
+Portal Auth0 cookies do not grant MCP access. MCP requires signed Auth0 access
+tokens, an approved subject and read/write/link-management permissions. Never
+restore anonymous access or static-secret fallback to work around OAuth errors.
+Preserve existing portal client and session bindings during rollout.
 
 **P3 — Agent guidance lives only where agents actually read.**
 Tool descriptions (bilingual triggers + cross-refs), tool results (`note`,
@@ -112,7 +110,7 @@ transcript, a commit, or a doc. Pipe secrets straight into env vars
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests     # 498 tests, sqlite, no DB server
+python3 -m unittest discover -s tests     # 519 tests, sqlite, no DB server
 python3 -m app.main                       # local run, http://localhost:8080
 PORTAL_DEV_RELOAD=1 python3 -m app.main   # …and re-read portal.html per request
 python3 scripts/mint_link.py --label X --base-url URL   # mint portal link
@@ -128,9 +126,10 @@ scripts/deploy.sh --dry-run               # inspect; drop the flag to deploy
 | `app/db.py` | portable layer: Postgres (`DATABASE_URL`) / sqlite (tests, shared locked conn); `:name` params both drivers; `_migrate_history_actions()` — the one in-place constraint change, inspection-driven and idempotent |
 | `app/config.py` | `PORTAL_BASE_URL` in one place: the Auth0 redirect and the MCP's full portal link read the same value |
 | `app/web.py` + `api.py` + `portal.html` | `/t/<token>` bilingual four-tab portal (due · classes · history · stats) + `POST /api/*` (token revalidated every request) |
-| `app/mcp_server.py` | 18 tools + 记账/对账/修复 persona prompts + optional bearer middleware |
+| `app/mcp_server.py` | 18 tools + 记账/对账/修复 persona prompts + mandatory OAuth resource-server guards |
+| `app/mcp_auth.py` | MCP token verification, discovery, permissions and authenticated attribution |
 | `app/auth.py` | portal Auth0 login; inert unless all four `AUTH0_*`/`SESSION_SECRET` vars are set. Guards the portal only, never `/mcp` |
-| `app/main.py` | one service: portal + API + `/mcp`; env `DATABASE_URL`, `APP_TZ`, `MCP_SECRET` (leave unset), `PORT`, `PORTAL_DEV_RELOAD` |
+| `app/main.py` | one service: portal + API + `/mcp`; env `DATABASE_URL`, `APP_TZ`, `MCP_AUTH_ISSUER`, `MCP_RESOURCE_URL`, `MCP_MEMBERS_JSON`, `PORT`, `PORTAL_DEV_RELOAD` |
 | `db/schema.sql` | portable DDL, applied idempotently at startup; **first breaking change must start dated migration files** |
 | `db/hardening.sql` | constraints applied **best-effort** at startup — they can fail against existing data, and a live portal must still boot; failures log a warning |
 | `docs/` | contract · MCP design · runbook · changelog · backlog · **lessons (failure → rule)** · first-deploy record |

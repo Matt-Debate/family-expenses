@@ -15,21 +15,18 @@ clients, and prompts are user-invoked. Therefore:
   * three personas ship as MCP prompts (记账 / 对账 / 修复) for clients that
     expose prompt templates.
 
-Auth (owner's accepted threat model): links never expire; ``/mcp`` is open
-unless ``MCP_SECRET`` is set.
+MCP requires Auth0 OAuth bearer tokens and approved household permissions.
 """
 
 from __future__ import annotations
 
-import hmac
 import os
 from typing import Any, Optional, Union
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from starlette.responses import JSONResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
 
+from .mcp_auth import McpBearerMiddleware, protected_tool, protect_protocol_logs, OAuthFastMCP
 from .config import portal_base_url, portal_link
 from .store import (
     BORROW_CATEGORY, CATEGORY_KEYS, Store, ValidationError, _utc_now_iso,
@@ -123,8 +120,8 @@ RULES OF THUMB:
   also the linked course's name, so "羽毛球" finds a payment described
   "Badminton". If a tool returns matched>1 with candidates, show them briefly
   and ask which; then call again with expense_id. Never guess.
-- Pass the speaker's name as submitted_by / changed_by when you know it —
-  the family reads the edit history.
+- Attribution is assigned by the server from the authenticated household member;
+  submitted_by / changed_by / logged_by supplied by the client are ignored.
 """
 
 
@@ -150,7 +147,7 @@ def _help_text() -> str:
 
 def build_mcp(store: Store) -> FastMCP:
     help_text = _help_text()
-    mcp = FastMCP(
+    mcp = OAuthFastMCP(
         "family-expenses",
         instructions=help_text,  # bonus for clients that surface it
         stateless_http=True,
@@ -228,7 +225,7 @@ def build_mcp(store: Store) -> FastMCP:
         }
 
     # ── help ──────────────────────────────────────────────────────────────
-    @mcp.tool(annotations=_READ)
+    @protected_tool(mcp, annotations=_READ)
     def expenses_help() -> str:
         """START HERE when unsure. Returns the playbook: which tool for which
         user phrase (中文/EN), defaults, how to resolve ambiguity, and the
@@ -236,7 +233,7 @@ def build_mcp(store: Store) -> FastMCP:
         return help_text
 
     # ── reads ─────────────────────────────────────────────────────────────
-    @mcp.tool(annotations=_READ)
+    @protected_tool(mcp, annotations=_READ)
     def expenses_list(
         status: str = "all",
         query: Optional[str] = None,
@@ -296,7 +293,7 @@ def build_mcp(store: Store) -> FastMCP:
             else None,
         }
 
-    @mcp.tool(annotations=_READ)
+    @protected_tool(mcp, annotations=_READ)
     def expenses_history(expense_id: str) -> dict[str, Any]:
         """Audit trail for ONE expense: every add/edit/paid/delete with who and
         when. Use for: '谁改的/这条怎么回事/what happened to this one'.
@@ -304,7 +301,7 @@ def build_mcp(store: Store) -> FastMCP:
         return {"history": [h.to_dict() for h in store.history(expense_id)]}
 
     # ── writes ────────────────────────────────────────────────────────────
-    @mcp.tool(annotations=_WRITE)
+    @protected_tool(mcp, annotations=_WRITE)
     def expenses_add(
         amount: Union[str, float],
         description: Optional[str] = None,
@@ -332,7 +329,7 @@ def build_mcp(store: Store) -> FastMCP:
         result["note"] = _summary_note() + _category_note(category)
         return result
 
-    @mcp.tool(annotations=_WRITE)
+    @protected_tool(mcp, annotations=_WRITE)
     def expenses_mark_paid(
         expense_id: Optional[str] = None,
         query: Optional[str] = None,
@@ -358,7 +355,7 @@ def build_mcp(store: Store) -> FastMCP:
         result["note"] = _summary_note()
         return result
 
-    @mcp.tool(annotations=_WRITE)
+    @protected_tool(mcp, annotations=_WRITE)
     def expenses_update(
         expense_id: Optional[str] = None,
         query: Optional[str] = None,
@@ -402,7 +399,7 @@ def build_mcp(store: Store) -> FastMCP:
             )
         return result
 
-    @mcp.tool(annotations=_DESTRUCTIVE)
+    @protected_tool(mcp, annotations=_DESTRUCTIVE)
     def expenses_delete(
         expense_id: Optional[str] = None,
         query: Optional[str] = None,
@@ -427,7 +424,7 @@ def build_mcp(store: Store) -> FastMCP:
             f"(¥{expense.gross_amount:.2f} paid, ¥{expense.refunded:.2f} back)"
         )
 
-    @mcp.tool(annotations=_WRITE)
+    @protected_tool(mcp, annotations=_WRITE)
     def expenses_refund(
         amount: Union[str, float],
         expense_id: Optional[str] = None,
@@ -509,7 +506,7 @@ def build_mcp(store: Store) -> FastMCP:
         result["note"] = note
         return result
 
-    @mcp.tool(annotations=_DESTRUCTIVE)
+    @protected_tool(mcp, annotations=_DESTRUCTIVE)
     def expenses_refund_delete(
         refund_id: str, changed_by: Optional[str] = None
     ) -> dict[str, Any]:
@@ -633,7 +630,7 @@ def build_mcp(store: Store) -> FastMCP:
                   "`package_id` can separate — say so rather than guessing"),
         }
 
-    @mcp.tool(annotations=_READ)
+    @protected_tool(mcp, annotations=_READ)
     def classes_list(
         query: Optional[str] = None,
         include_archived: bool = False,
@@ -689,7 +686,7 @@ def build_mcp(store: Store) -> FastMCP:
                        " · pass verbose=true for the class log with event ids"),
         }
 
-    @mcp.tool(annotations=_WRITE)
+    @protected_tool(mcp, annotations=_WRITE)
     def classes_add(
         name: str,
         class_count: Union[str, int],
@@ -752,7 +749,7 @@ def build_mcp(store: Store) -> FastMCP:
             f"reclaimable, {s['forfeited']} skipped by us)"
         )
 
-    @mcp.tool(annotations=_WRITE)
+    @protected_tool(mcp, annotations=_WRITE)
     def classes_log(
         kind: str,
         package_id: Optional[str] = None,
@@ -795,7 +792,7 @@ def build_mcp(store: Store) -> FastMCP:
         )
         return package
 
-    @mcp.tool(annotations=_DESTRUCTIVE)
+    @protected_tool(mcp, annotations=_DESTRUCTIVE)
     def classes_log_delete(
         event_id: str, changed_by: Optional[str] = None
     ) -> dict[str, Any]:
@@ -818,7 +815,7 @@ def build_mcp(store: Store) -> FastMCP:
         )
         return package
 
-    @mcp.tool(annotations=_WRITE)
+    @protected_tool(mcp, annotations=_WRITE)
     def classes_update(
         package_id: Optional[str] = None,
         query: Optional[str] = None,
@@ -867,7 +864,7 @@ def build_mcp(store: Store) -> FastMCP:
         )
         return package
 
-    @mcp.tool(annotations=_DESTRUCTIVE)
+    @protected_tool(mcp, annotations=_DESTRUCTIVE)
     def classes_delete(
         package_id: Optional[str] = None,
         query: Optional[str] = None,
@@ -899,7 +896,7 @@ def build_mcp(store: Store) -> FastMCP:
         }
 
     # ── link management ───────────────────────────────────────────────────
-    @mcp.tool(annotations=_READ)
+    @protected_tool(mcp, annotations=_READ)
     def expenses_list_links(include_revoked: bool = False) -> dict[str, Any]:
         """List the portal links that exist and how they are being used. Use
         for: '谁有链接/哪些链接还在用/有几个链接', 'who has a link', 'list the
@@ -940,7 +937,7 @@ def build_mcp(store: Store) -> FastMCP:
             ),
         }
 
-    @mcp.tool(annotations=_WRITE)
+    @protected_tool(mcp, annotations=_WRITE)
     def expenses_mint_link(
         label: Optional[str] = None, expires_days: Optional[int] = None
     ) -> dict[str, Any]:
@@ -960,7 +957,7 @@ def build_mcp(store: Store) -> FastMCP:
         )
         return minted
 
-    @mcp.tool(annotations=_DESTRUCTIVE)
+    @protected_tool(mcp, annotations=_DESTRUCTIVE)
     def expenses_revoke_link(token_or_id: str) -> dict[str, Any]:
         """Kill a portal link (lost phone, leaked URL). Takes the token or its
         id — call expenses_list_links first to see the ids. Revoking is
@@ -1023,33 +1020,5 @@ def build_mcp(store: Store) -> FastMCP:
             + (f"\n\nThe problem: {problem}" if problem else "")
         )
 
+    protect_protocol_logs()
     return mcp
-
-
-class McpBearerMiddleware:
-    """Optional bearer gate on the MCP mount.
-
-    ``MCP_SECRET`` set → require ``Authorization: Bearer $MCP_SECRET`` (401
-    otherwise). Unset → /mcp is open, per the owner's accepted threat model
-    (obscure URL, low-stakes ledger). Portal and API paths are never touched.
-    """
-
-    def __init__(self, app: ASGIApp, protected_prefix: str = "/mcp"):
-        self.app = app
-        self.prefix = protected_prefix
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not scope["path"].startswith(self.prefix):
-            await self.app(scope, receive, send)
-            return
-        secret = os.environ.get("MCP_SECRET", "")
-        if secret:
-            headers = dict(scope.get("headers") or [])
-            supplied = (headers.get(b"authorization") or b"").decode()
-            if not hmac.compare_digest(supplied, f"Bearer {secret}"):
-                response = JSONResponse(
-                    {"ok": False, "error": "unauthorized"}, status_code=401
-                )
-                await response(scope, receive, send)
-                return
-        await self.app(scope, receive, send)

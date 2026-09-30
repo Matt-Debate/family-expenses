@@ -409,7 +409,7 @@ class DocumentedCountsTests(unittest.TestCase):
 
     def test_documented_tool_count_matches_the_server(self):
         mcp_src = (self.ROOT / "app" / "mcp_server.py").read_text(encoding="utf-8")
-        actual = mcp_src.count("@mcp.tool")
+        actual = mcp_src.count("@protected_tool(mcp,")
         claude_md = (self.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn(f"{actual} tools", claude_md)
 

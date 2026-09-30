@@ -64,8 +64,10 @@ not a dependency — the tools alone carry every rule needed for cold requests.
 
 Owner's ranking: **availability-for-the-family > everything else**. A change
 that risks forcing a reconnect is worse than a change that risks a bad ledger
-entry. See FEATURE_CONTRACT §5.1 (compatibility contract) — mount path, URL
-stability, and the no-header posture are frozen.
+entry. See FEATURE_CONTRACT §5.1: mount path, URL and portal compatibility remain
+frozen. The owner approved the MCP OAuth exception for implementation/migration
+planning on 2026-09-30; deployment and coordinated reconnection still require
+separate approval (RUNBOOK §9).
 
 ## Regression guardrails
 
@@ -74,3 +76,18 @@ present in descriptions, cross-references intact, annotations correct,
 personas registered, numeric amounts accepted, one-call already-paid add,
 notes on write results, and coaching text inside error strings. If an edit
 moves guidance out of an agent-visible channel, a test fails.
+
+
+## Authentication (v0.14.0 local implementation)
+
+All 18 tools require OAuth. Protected-resource discovery advertises the Auth0
+issuer and minimal read scope; each tool's canonical `securitySchemes` and `_meta` mirror carry
+the complete requirement (read plus write/links where applicable). `expenses:read` protects expense/history/class reads and help;
+`expenses:write` protects ledger/class mutations; `expenses:links` protects link
+listing, minting and revocation. Every HTTP caller also requires read. Tool
+execution repeats authorization before store access, and all attribution fields
+are overwritten from the authenticated member policy. HTTP 401/403 boundary challenges include resource metadata. Read-authorized
+insufficient-scope tool calls return MCP `isError` with `mcp/www_authenticate`
+metadata for consent/step-up without store access. Actual ChatGPT behavior
+remains a rollout gate.
+RUNBOOK §9 owns provider setup, pending resource-binding verification and migration.

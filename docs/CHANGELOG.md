@@ -1,5 +1,38 @@
 # Changelog — Family Expenses
 
+
+## v0.14.0 — MCP OAuth resource server (2026-09-30, local only)
+
+Owner explicitly supersedes the old anonymous-MCP requirement for implementation
+and migration planning. **Not deployed; real ChatGPT OAuth remains unverified.**
+Adversarial review and same-reviewer fix verification complete; no remaining
+local security blocker. Owner-approved Auth0 / Cloud Run setup remains pending.
+
+- Mandatory RS256 Auth0 access tokens, exact issuer and resource audience,
+  expiry/not-before validation, approved subjects and consent/RBAC/local policy
+  intersection for read, write and link management; no MCP_SECRET bypass.
+- Protected-resource discovery, bearer and insufficient-scope challenges,
+  per-tool OAuth metadata and execution guards; server-assigned attribution.
+- Missing Cloud Run auth configuration fails before DB initialization. Local
+  unconfigured MCP returns 503 while portal development remains available.
+- Offline signed-token/SQLite tests cover failures, permissions, reads/writes,
+  link management, identity spoofing, context isolation and protocol log hygiene.
+- Deploy script preserves existing portal settings and secret bindings, requires
+  a pinned member-policy version; coordinated cutover and safe recovery in §9.
+- Completed adversarial review found no auth bypass, but identified JWKS refresh
+  amplification, root SDK log leakage and incomplete tool-level OAuth signaling.
+  Local fixes serialize/cooldown JWKS fetches in an isolated worker, scrub SDK
+  records at creation, advertise canonical/mirrored complete scope metadata, and
+  return MCP step-up error metadata while retaining execution denial. Regression
+  tests exercise concurrency/rotation/outage, worker isolation, actual root logs
+  and HTTP wire behavior. Same-reviewer verification confirmed all substantive
+  findings resolved and found no new runtime blocker.
+- Runtime dependencies and Python base image are pinned; clean-environment
+  validation and exact existing-personal-plugin reconnection guidance in RUNBOOK §9.
+- Original checkout's existing uncommitted portal-session work was carried into
+  the isolated implementation copy for regression testing, left unchanged.
+
+
 Semantic versioning. Unreleased work accumulates under [Unreleased] and is cut
 to a release entry when a chunk set ships.
 

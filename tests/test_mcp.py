@@ -19,6 +19,9 @@ from starlette.testclient import TestClient  # noqa: E402
 from app.db import Database  # noqa: E402
 from app.mcp_server import McpBearerMiddleware, build_mcp  # noqa: E402
 from app.store import Store  # noqa: E402
+from app.mcp_auth import principal
+from mcp_auth_support import ADMIN, ENV, token, offline_keys
+from unittest.mock import patch
 
 EXPECTED_TOOLS = {
     "expenses_help", "expenses_list", "expenses_add", "expenses_mark_paid",
@@ -39,7 +42,11 @@ def make_store() -> Store:
 
 
 def run(coro):
-    return _TEST_LOOP.run_until_complete(coro)
+    context = principal.set(ADMIN)
+    try:
+        return _TEST_LOOP.run_until_complete(coro)
+    finally:
+        principal.reset(context)
 
 
 def tearDownModule():
@@ -1059,44 +1066,8 @@ class RefundAndCourseToolTests(unittest.TestCase):
         self.assertIn("PORTAL_BASE_URL is not set", call("expenses_help"))
 
 
-class BearerMiddlewareTests(unittest.TestCase):
-    """/mcp: open when MCP_SECRET unset (owner's accepted threat model),
-    enforced when set. Other paths always untouched."""
-
-    def make_client(self) -> TestClient:
-        async def open_ok(request):
-            return JSONResponse({"ok": True})
-
-        inner = Starlette(routes=[
-            Route("/healthz", open_ok, methods=["GET"]),
-            Route("/mcp", open_ok, methods=["GET"]),
-        ])
-        return TestClient(McpBearerMiddleware(inner))
-
-    def test_no_secret_means_open(self):
-        os.environ.pop("MCP_SECRET", None)
-        client = self.make_client()
-        self.assertEqual(client.get("/mcp").status_code, 200)
-        self.assertEqual(client.get("/healthz").status_code, 200)
-
-    def test_secret_set_enforces_bearer(self):
-        os.environ["MCP_SECRET"] = "s3cret"
-        try:
-            client = self.make_client()
-            self.assertEqual(client.get("/mcp").status_code, 401)
-            self.assertEqual(
-                client.get("/mcp", headers={"Authorization": "Bearer wrong"}).status_code, 401)
-            self.assertEqual(
-                client.get("/mcp", headers={"Authorization": "Bearer s3cret"}).status_code, 200)
-            self.assertEqual(client.get("/healthz").status_code, 200)  # portal unaffected
-        finally:
-            os.environ.pop("MCP_SECRET", None)
-
-
 class CompatibilityContractTests(unittest.TestCase):
-    """FEATURE_CONTRACT §5.1 / A8: nothing may ever force a connected family
-    member to reconnect. These pin the frozen surface — if one of these fails,
-    the change would break her bookmark or connector."""
+    """Preserve paths and live-link behavior through the approved MCP migration."""
 
     def test_mcp_mount_path_is_frozen(self):
         self.assertEqual(McpBearerMiddleware(lambda s, r, w: None).prefix, "/mcp")
@@ -1110,8 +1081,8 @@ class CompatibilityContractTests(unittest.TestCase):
         for name in ("list", "submit", "update", "mark-paid", "delete", "history"):
             self.assertIn(f"/api/{name}", paths)
 
-    def test_default_posture_needs_no_credentials(self):
-        # unset MCP_SECRET = open; minted tokens have no expiry
+    def test_existing_portal_tokens_still_have_no_expiry(self):
+        # MCP auth changes must not change portal-link lifetime
         os.environ.pop("MCP_SECRET", None)
         store = make_store()
         minted = store.mint_token(label="wife")
@@ -1136,9 +1107,8 @@ class CombinedAppTests(unittest.TestCase):
             with TestClient(build_asgi_app()) as client:
                 self.assertEqual(client.get("/health").status_code, 200)
                 self.assertEqual(client.get("/t/badtoken").status_code, 404)
-                # MCP open when no secret configured: transport answers (405
-                # for plain GET without SSE accept), not 401/503 gatekeeping.
-                self.assertNotIn(client.get("/mcp").status_code, (401, 503))
+                # Unconfigured local MCP fails closed; portal remains usable.
+                self.assertEqual(client.get("/mcp").status_code, 503)
         finally:
             os.environ.pop("DATABASE_URL", None)
 
@@ -1168,10 +1138,11 @@ class CombinedAppTests(unittest.TestCase):
             initialized_notification = {
                 "jsonrpc": "2.0", "method": "notifications/initialized", "params": {}
             }
-            with TestClient(
+            with patch.dict("os.environ", ENV), offline_keys(), TestClient(
                 build_asgi_app(),
                 base_url="https://family-expenses-test.asia-southeast1.run.app",
             ) as client:
+                headers["Authorization"] = "Bearer " + token()
                 initialized = client.post("/mcp", headers=headers, json=initialize)
                 notified = client.post(
                     "/mcp", headers=headers, json=initialized_notification
