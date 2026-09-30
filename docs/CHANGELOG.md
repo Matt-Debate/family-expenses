@@ -8,8 +8,12 @@ Owner approved the Auth0 setup and production cutover to revision
 is denied. The owner reports successful ChatGPT web OAuth sign-in/consent and a
 household read; the parent independently reports a connected read preserving the
 38-record baseline. Adversarial review and fix verification are complete.
-Desktop/iOS pickup, wife reconnection and live write/step-up acceptance remain
-pending; no live ledger or link mutations were used to test authentication.
+Desktop connection and the owner-requested single paid MCP test entry are
+confirmed. API-only offline access was then approved and enabled; 900-second
+access-token lifetimes and WorkOS/shared-client policy are preserved. A connected
+read beyond 20 minutes and an exact-audience successful Auth0 refresh exchange
+verify renewal. iOS, wife reconnection and live link/step-up acceptance remain
+pending; no assistant ledger/link test mutations were performed.
 
 - Mandatory RS256 Auth0 access tokens, exact issuer and resource audience,
   expiry/not-before validation, approved subjects and consent/RBAC/local policy

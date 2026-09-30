@@ -8,8 +8,12 @@ household permissions, user-delegated ChatGPT client grant, runtime membership a
 log hygiene are configured. Live discovery and anonymous denial were verified.
 The owner reports successful web OAuth sign-in/consent and household read; the
 parent independently reports a connected read with the unchanged 38-record baseline.
-Remaining checks: desktop/iOS pickup, wife reconnection, and live write/step-up
-authorization without test mutations of real household data or links.
+Desktop Connected status and one owner-requested paid MCP test entry were
+confirmed. API-only offline access was approved; a read beyond 20 minutes and
+exact-audience Auth0 refresh event confirm automatic renewal. Remaining checks:
+iOS pickup, wife reconnection, and live link/step-up authorization. The shared
+client retains the disclosed non-expiring, non-rotating refresh policy; changing
+it requires approval and coordination with WorkOS.
 See RUNBOOK §9.5 for exact configuration and evidence. Never restore anonymous
 access to resolve another client's reconnection failure.
 

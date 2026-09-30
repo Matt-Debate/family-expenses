@@ -411,10 +411,13 @@ connected `expenses_list({})` read: 38 records matched the previous baseline,
 with no new records or writes. Tools reappeared and watcher access was restored.
 No ledger contents or tokens were retained as acceptance evidence.
 
-Desktop and iOS pickup remain acceptance checks. Use the same ChatGPT account,
+The owner subsequently reported desktop Connected status and explicitly tested
+one MCP add/mark-paid operation after reconnect; the parent verified exactly one
+matching paid test entry. No assistant test writes or duplicate retry were performed.
+iOS pickup and wife reconnection remain acceptance checks. Use the same ChatGPT account,
 refresh the app and follow any secure sign-in prompt; do not assume the old plugin
-identity survives. Keep the phone portal bookmark unchanged. Live write and link
-authorization were not exercised by mutating the household ledger or links.
+identity survives. Keep the phone portal bookmark unchanged. Owner-requested live write authorization is now verified by that separate user test;
+link-management authorization was not exercised by mutating live links.
 The isolated test suite covers those permission boundaries; actual step-up consent
 is still unverified because this owner connection requests all three base scopes.
 
@@ -439,9 +442,43 @@ is still unverified because this owner connection requests all three base scopes
 - Independent live checks returned healthy service and OAuth discovery, and
   401 bearer challenges for anonymous and invalid-token MCP requests.
 - Real web OAuth plus authorized household read is now established by the
-  reported acceptance evidence above. Desktop/iOS propagation, wife reconnection
-  and live write/step-up behavior remain pending; do not restore anonymous access
+  reported acceptance evidence above. iOS propagation, wife reconnection
+  and live link/step-up behavior remain pending; do not restore anonymous access
   if another client needs reconnection.
+
+### 9.5.2 Refresh renewal correction and acceptance
+
+Initial API configuration had `allow_offline_access=false`. The client supported
+refresh grants and ChatGPT requested `offline_access`, but observed successful
+refresh events targeted WorkOS rather than Family Expenses. The first Family
+Expenses connection required manual reconnect after the 900-second access token
+expired. No expiry extension or anonymous fallback was introduced.
+
+After explicit owner approval acknowledging persistent access, only this Family
+Expenses API flag was changed to `allow_offline_access=true`. Full API readback
+confirmed it was the only changed field, with both token lifetimes still 900
+seconds. WorkOS API and shared-client refresh policy were untouched. The reused
+client still has non-rotating, non-expiring refresh tokens: access can persist
+until revoked. A future bounded/rotating policy requires deliberate approval
+because this client also serves WorkOS; do not silently change its policy.
+
+The owner completed fresh web consent explicitly showing offline access and
+reported desktop Connected status. The latest authorization-code exchange
+(`seacft`) was at 05:26:26.541 UTC on 2026-09-30. The parent reported a
+successful connected read at 05:47:20 UTC without another parent reconnect.
+Auth0 independently recorded successful refresh exchange `sertft` at
+05:47:41.046 UTC for the exact Family Expenses MCP audience, with
+`openid email expenses:write expenses:links expenses:read offline_access`.
+No new Family Expenses code exchange appeared between those events. The
+21-minute interval and successful refresh establish renewal beyond the original
+900-second lifetime. Read/renewal acceptance required no further ledger mutation.
+
+For another existing connection that still expires, reconnect it once after the
+offline-access change and complete consent securely. Do not delete/recreate the
+OAuth plugin definition merely to obtain fresh consent. Verify a read beyond
+15 minutes and provider refresh evidence, with no intervening reconnect.
+Keep access tokens, refresh tokens, codes and credential-bearing URLs out of
+logs and documentation.
 
 ### 9.6 Reproducible runtime and review evidence
 
