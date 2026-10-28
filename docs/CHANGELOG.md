@@ -1,6 +1,6 @@
 # Changelog — Family Expenses
 
-## v0.14.2 — Renew sessions on ordinary portal reads (2026-10-28)
+## v0.14.2 — Renew sessions on ordinary portal reads (2026-10-28, deployed)
 
 Live verification of v0.14.1 confirmed the 400-day cookie but caught missing
 renewal on read-only visits: pinned Starlette 1.7 persists only modified

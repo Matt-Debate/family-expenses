@@ -1,6 +1,6 @@
 # Family Expenses session continuity — 28 October 2026
 
-Status: owner approved deployment. Initial revision family-expenses-00018-4kc is live; the read-only renewal follow-up has passed all 523 tests and awaits its build/deploy.
+Status: deployed and live-verified as family-expenses-00019-hln, 100% traffic.
 
 ## Release identity
 
@@ -73,3 +73,21 @@ read-only second visit and failed against the first deployed fix. v0.14.2 wraps
 the validated session with a mapping touch before routing, so normal reads
 renew it too. Focused tests and all 523 tests under the pinned runtime pass.
 The owner's existing deployment approval covers this correction to the same fix.
+
+
+## Completed production acceptance
+
+Owner approved deployment explicitly in this chat on 28 October 2026.
+Final source: `473582df34f023cf74d11a3ef8645f854074e497` (v0.14.2).
+Build `40516bfa-fb2a-49af-85b5-84b83d118cc0` succeeded; image
+`gcr.io/work-dashboards/family-expenses@sha256:02078af05206e7a9040cd0676aedb68163147ffe2adfb8f6e5329e8ddbab7176`
+is live as revision `family-expenses-00019-hln`, 100% traffic.
+
+A live `/login` cookie was reused on a read-only `/health` request: HTTP 200
+and a renewed `Max-Age=34560000` cookie confirmed actual rolling behavior.
+The complete runtime specification except image remains unchanged from revision
+00017, including environment and session/member/database secret references.
+The existing authenticated Family Expenses connector works after deployment.
+No production outage was induced; outage denial/recovery is covered offline.
+The owner-approved attendance correction was separately verified through the MCP,
+with the original records retained in the ledger audit trail.
