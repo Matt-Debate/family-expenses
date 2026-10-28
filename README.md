@@ -3,7 +3,7 @@
 A tiny, private household expense portal. One bookmarkable link for a family
 member to **submit and edit expenses that need paying** (with a "mark paid on
 date" check-off and a full edit history), plus an **MCP server** so the owner
-can query the ledger from Claude or ChatGPT.
+can query the ledger from Codex or ChatGPT. Agent policies live in [AGENTS.md](AGENTS.md); Claude tooling is retired.
 
 Built to replace free-text WeChat messages — not a business system.
 
@@ -37,13 +37,13 @@ Built to replace free-text WeChat messages — not a business system.
 
 ```bash
 pip install -r requirements.lock
-python3 -m unittest discover -s tests        # 523 tests, sqlite, no DB server
+python3 -m unittest discover -s tests        # 542 tests, sqlite, no DB server
 python3 -m app.main                          # http://localhost:8080
 python3 scripts/mint_link.py --label wife --base-url http://localhost:8080
 ```
 
 Deploying to Cloud Run + Neon, minting the real link, and connecting
-Claude/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
+Codex/ChatGPT to the MCP: see **`docs/RUNBOOK.md`**.
 
 ## Status
 

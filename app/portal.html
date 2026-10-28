@@ -240,6 +240,7 @@
     <details class="add" id="addWrap">
       <summary data-i18n="add"></summary>
       <form id="addForm">
+        <fieldset id="addFields" style="border:0;padding:0;margin:0;min-width:0">
         <div class="row">
           <div>
             <label for="amount" data-i18n="amount"></label>
@@ -254,7 +255,26 @@
         <input id="desc" type="text" data-i18n-ph="desc_ph">
         <label for="category" data-i18n="category"></label>
         <select id="category"></select>
-        <button type="submit" class="primary" data-i18n="save_new"></button>
+        <fieldset id="feeCourse" hidden disabled style="border:0;padding:0;margin:12px 0">
+          <legend data-i18n="fee_course"></legend>
+          <p class="hint" data-i18n="fee_hint"></p>
+          <label for="feeName" data-i18n="cls_name"></label>
+          <input id="feeName" type="text" required>
+          <div class="row">
+            <div><label for="feeCount" data-i18n="cls_count"></label>
+              <input id="feeCount" type="number" min="1" max="1000" step="1" required></div>
+            <div><label for="feeKind" data-i18n="cls_kind"></label>
+              <select id="feeKind" required></select></div>
+          </div>
+          <div id="feePeriodWrap" hidden>
+            <label for="feePeriod" data-i18n="cls_period"></label>
+            <input id="feePeriod" type="text">
+          </div>
+          <p id="feeRateHint" class="hint" aria-live="polite"></p>
+        </fieldset>
+        </fieldset>
+        <p id="addStatus" class="hint" role="status" aria-live="polite"></p>
+        <button id="addSave" type="submit" class="primary" data-i18n="save_new"></button>
       </form>
     </details>
     <div id="nowBody"></div>
@@ -311,7 +331,7 @@
 
   // Category keys mirror app/store.py CATEGORIES — CategoryParityTests fails
   // if the two lists drift apart.
-  var CATS = ["living","aden-edu","aden-sports","aden-clothes","aden-other",
+  var CATS = ["living","aden-edu","aden-sports","aden-edu-classes","aden-sports-classes","aden-clothes","aden-other",
               "food","home","utilities","internet","mobile","transport",
               "travel","entertainment","clothes","medical","borrow","other"];
   var BORROW = "borrow";
@@ -371,7 +391,10 @@
       ch_cat:"分类占比", ch_cat_cap:"近 12 个月 · Matt 已付",
       added:"已添加", saved:"已保存", deleted:"已删除", marked:"已标记付款",
       unmarked:"已恢复待付", err:"出错了，请重试", link_err:"链接无效或已过期",
-      cat:{ living:"生活费","aden-edu":"Aden 教育","aden-sports":"Aden 运动",
+      fee_course:"课程资料（必填）", fee_hint:"课费和课程将一起保存。装备、场地等其他费用请选择原来的教育或运动分类。",
+      fee_saved:"课程已添加", fee_total:"课费总额", fee_per:"每节约", fee_invalid:"请填写课程名称、类型及 1–1000 的整数课时数",
+      add_uncertain:"尚未确认是否保存成功。请刷新并查看记录，确认后再添加，避免重复。",
+      cat:{ living:"生活费","aden-edu":"Aden 教育","aden-sports":"Aden 运动","aden-edu-classes":"Aden 教育课费","aden-sports-classes":"Aden 运动课费",
         "aden-clothes":"Aden 衣服","aden-other":"Aden 其他", food:"食品", home:"家居",
         utilities:"水电", internet:"网络", mobile:"手机", transport:"交通",
         travel:"旅行", entertainment:"娱乐", clothes:"衣服", medical:"医疗",
@@ -432,7 +455,10 @@
       ch_cat:"By category", ch_cat_cap:"Last 12 months · paid by Matt",
       added:"Added", saved:"Saved", deleted:"Deleted", marked:"Marked paid",
       unmarked:"Back to unpaid", err:"Something went wrong", link_err:"This link is invalid or expired",
-      cat:{ living:"Living","aden-edu":"Aden · education","aden-sports":"Aden · sports",
+      fee_course:"Course details (required)", fee_hint:"The fee and course are saved together. For equipment, court hire and other costs, use the education or sports category.",
+      fee_saved:"Course added", fee_total:"Fee total", fee_per:"Approx. per class", fee_invalid:"Enter a course name, type and a whole class count from 1 to 1000",
+      add_uncertain:"Save could not be confirmed. Reload and check the records before adding again to avoid a duplicate.",
+      cat:{ living:"Living","aden-edu":"Aden · education","aden-sports":"Aden · sports","aden-edu-classes":"Aden · education class fees","aden-sports-classes":"Aden · sports class fees",
         "aden-clothes":"Aden · clothes","aden-other":"Aden · other", food:"Food", home:"Home",
         utilities:"Utilities", internet:"Internet", mobile:"Mobile", transport:"Transport",
         travel:"Travel", entertainment:"Entertainment", clothes:"Clothes", medical:"Medical",
@@ -585,10 +611,9 @@
     }).then(function (r) { return r.json().then(function (j) {
       if (!r.ok || !j.ok) {
         var err = new Error(j.error || t("err"));
-        // the server answered and refused: nothing was written. A rejection
-        // WITHOUT this flag is ambiguous — the request may have committed and
-        // its response been lost — which the class log has to treat differently
-        err.answered = true;
+        // Only a client/validation refusal proves that the write was refused.
+        // A JSON 5xx, like a lost response, can follow a committed write.
+        err.answered = (r.status >= 400 && r.status < 500) || (r.ok && j.ok === false);
         throw err;
       } return j; }); });
   }
@@ -617,6 +642,10 @@
       '</option><option value="period">' + esc(t("cls_kind_period")) + "</option>";
     if (keepKind) ks.value = keepKind;
     clsKindFields();
+    var fk = $("feeKind"), keepFeeKind = fk.value;
+    fk.innerHTML = ks.innerHTML;
+    if (keepFeeKind) fk.value = keepFeeKind;
+    feeCourseFields();
     render();
   }
   $("langBtn").addEventListener("click", function () {
@@ -1596,6 +1625,27 @@
   // What was written, in the order she reads it. Falls back to the bare word
   // when the server sent no row back, so a response-shape change degrades to
   // the old confirmation instead of printing "undefined" over her ledger.
+  function isClassFee(category) {
+    return ["aden-edu-classes", "aden-sports-classes"].indexOf(String(category || "").trim().toLowerCase()) !== -1;
+  }
+  function feeCourseFields() {
+    var active = isClassFee($("category").value);
+    $("feeCourse").hidden = !active; $("feeCourse").disabled = !active;
+    var period = active && $("feeKind").value === "period";
+    $("feePeriodWrap").hidden = !period; $("feePeriod").disabled = !period;
+    feeRateHint();
+  }
+  function feeRateHint() {
+    var amount = Number($("amount").value), count = Number($("feeCount").value);
+    $("feeRateHint").textContent = amount > 0 && Number.isInteger(count) && count > 0 && count <= 1000 ?
+      t("fee_total") + " " + money(amount) + " ÷ " + count + " " + t("cls_cls") +
+      " · " + t("fee_per") + " " + money(amount / count) : "";
+  }
+  $("category").addEventListener("change", feeCourseFields);
+  $("feeKind").addEventListener("change", feeCourseFields);
+  $("feeCount").addEventListener("input", feeRateHint);
+  $("amount").addEventListener("input", feeRateHint);
+
   function addedMsg(e) {
     // Needs a date AND a numeric amount to say anything true. A row missing
     // either printed "undefined" or ¥0.00 across her ledger — a confirmation
@@ -1608,24 +1658,46 @@
       " · " + e.date + " · " + money(e.amount);
   }
 
+  var addPending = false;
   $("addForm").addEventListener("submit", function (ev) {
     ev.preventDefault();
-    api("submit", {
+    if (addPending) return;
+    var body = {
       date: $("date").value || todayStr(),
       amount: parseFloat($("amount").value),
       category: $("category").value,
       description: $("desc").value.trim() || null,
-    }).then(function (j) {
+    };
+    if (isClassFee(body.category)) {
+      var count = Number($("feeCount").value), name = $("feeName").value.trim();
+      var kind = $("feeKind").value;
+      if (!name || !Number.isInteger(count) || count < 1 || count > 1000 ||
+          ["per_class", "period"].indexOf(kind) === -1) {
+        toast(t("fee_invalid")); return;
+      }
+      body.course = {name: name, kind: kind, class_count: count,
+        period_label: kind === "period" ? $("feePeriod").value.trim() || null : null};
+    }
+    addPending = true; $("addSave").disabled = true; $("addFields").disabled = true; $("addStatus").textContent = "";
+    api("submit", body).then(function (j) {
       $("amount").value = ""; $("desc").value = "";
+      $("feeName").value = ""; $("feeCount").value = ""; $("feePeriod").value = "";
+      feeRateHint();
       $("addWrap").open = false;
-      // Confirm with the row the SERVER stored, never with the fields she
-      // typed. The two are not the same thing — a cleared date becomes the
-      // household's today, an amount is normalised — and echoing the form
-      // would confirm a write that did not happen that way. It is the same
-      // rule as the class date box: the value shown must be the value written.
-      toast(addedMsg(j && j.expense), 3200);
+      var msg = addedMsg(j && j.expense);
+      if (j && j.package) msg += " · " + t("fee_saved") + ": " + j.package.name +
+        " · " + j.package.class_count + " " + t("cls_cls");
+      toast(msg, 3200);
+      addPending = false; $("addSave").disabled = false; $("addFields").disabled = false;
       refresh();
-    }).catch(function (e) { toast(e.message); });
+      if (j && j.package) refreshClasses();
+    }).catch(function (e) {
+      // A network failure may follow a committed write. Keep the form locked
+      // until reload + inspection rather than offering an uncertain retry.
+      if (e.answered) { addPending = false; $("addSave").disabled = false; $("addFields").disabled = false; }
+      $("addStatus").textContent = e.answered ? e.message : t("add_uncertain");
+      toast(e.answered ? e.message : t("add_uncertain"));
+    });
   });
 
   // ---- per-item actions ----

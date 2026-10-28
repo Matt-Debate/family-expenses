@@ -1,5 +1,24 @@
 # Changelog — Family Expenses
 
+## v0.15.0 — Required course setup for class fees (2026-10-28, prepared)
+
+- New education-class and sports-class fee categories require course name,
+  type and whole class count. Expense, course and their audit entries save in
+  one transaction through the portal or MCP; no half-saved fee can remain.
+- The portal exposes required course fields inside Add expense and shows the
+  amount/count rate. Equipment and other fees keep the existing categories.
+  A pending submit cannot repeat; an uncertain response (including JSON 5xx) asks for reload and
+  inspection before retrying. Confirmation uses the saved expense and course.
+- Existing expenses are unchanged. Legacy course linking remains available;
+  category changes and course deletion cannot leave a class fee without its
+  course. Archive a completed course instead of deleting its tracker.
+- Owner retired Claude tooling and made AGENTS.md authoritative. Independent
+  Codex review replaces the mandatory cross-model gate; cross-model review is
+  optional on owner request.
+- No schema or authentication changes. Offline tests cover rollback after both
+  inserts, derived money, attributed audit records, API/MCP validation, category
+  switching, repeated taps, refused writes and uncertain network outcomes.
+
 ## v0.14.2 — Renew sessions on ordinary portal reads (2026-10-28, deployed)
 
 Live verification of v0.14.1 confirmed the 400-day cookie but caught missing

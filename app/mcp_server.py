@@ -46,7 +46,8 @@ Chinese or English. Always reply in the user's language.
 
 INTENT → TOOL:
 - "我还要付什么 / what do I owe / 有什么没付" → expenses_list(status="unpaid")
-- "足球课300块 / football 300" → expenses_add(amount="300", description="足球课")
+- "足球课300块 / football 300" → ask course name/type/count, then expenses_add
+  with category=aden-sports-classes and course={name,kind,class_count}
 - "昨天交了300的足球课(已经付了)" → expenses_add(..., paid=true, paid_date=...)
 - "足球课付了 / paid the football class / 交了" → expenses_mark_paid(query="足球课")
 - "足球课改成350 / actually it was 350" → expenses_update(query="足球课", amount="350")
@@ -57,7 +58,7 @@ INTENT → TOOL:
 - "哪些链接还在用 / who has a link / list the links" → expenses_list_links
 - "足球还剩几节课 / how many classes left / 还有几次" → classes_list
 - "足球课交了2200，10节课 / paid for 10 classes" → classes_add (the payment must
-  be in the ledger first — expenses_add, then classes_add(query=…))
+  be in the ledger already; for a NEW fee use expenses_add with course)
 - "今天上了足球课 / went today" → classes_log(kind="attended")
 - "今天的课取消了 / they cancelled" → classes_log(kind="missed_school")
 - "今天没去 / we skipped" → classes_log(kind="missed_us")
@@ -83,6 +84,11 @@ INTENT → TOOL:
   classes_delete(query=…) — confirm first; its class log stays in the
   payment's expenses_history
 
+CLASS FEES: use expenses_add(category='aden-edu-classes' or 'aden-sports-classes',
+course={name, kind, class_count, period_label?}) to save payment and course atomically.
+Ask for missing course details; never record a class fee alone. Equipment and
+court fees stay in aden-edu / aden-sports. classes_add links older untracked payments.
+
 CLASS TRACKER — two shapes, and they answer different questions:
 - kind="per_class": a pack of N classes. Attending draws one down. Answers
   "how many classes and how much money is LEFT".
@@ -96,7 +102,7 @@ A package carries NO money of its own: the rate is the linked payment's amount
 CATEGORIES — prefer these EXACT keys. Anything else is accepted and counted as
 an ordinary household expense (and charted under whatever string you sent), so
 an invented key does not vanish — it just is not one of the household's buckets:
-  living · aden-edu · aden-sports · aden-clothes · aden-other · food · home ·
+  living · aden-edu · aden-sports · aden-edu-classes · aden-sports-classes · aden-clothes · aden-other · food · home ·
   utilities · internet · mobile · transport · travel · entertainment ·
   clothes · medical · borrow · other
 
@@ -310,8 +316,14 @@ def build_mcp(store: Store) -> FastMCP:
         submitted_by: Optional[str] = None,
         paid: bool = False,
         paid_date: Optional[str] = None,
+        course: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        """Record an expense. Use for: '足球课300块', 'football class 300',
+        """Record an expense. For class fees use category aden-edu-classes or
+        aden-sports-classes AND course={name, kind: per_class|period, class_count,
+        period_label?}. Both save together or neither does. Ask for missing
+        course details before calling. The course rate is amount / class_count;
+        never send separate course money. Equipment/court fees use aden-edu or
+        aden-sports without course. Use for: '足球课300块', 'football class 300',
         '要交300的班费'. amount accepts 300, '¥300', '300块'. Omit date =
         today (China time). Keep the user's own words as description. If they
         say it's ALREADY paid ('昨天交了...'), pass paid=true (paid_date
@@ -320,12 +332,13 @@ def build_mcp(store: Store) -> FastMCP:
         # one transaction, even when it arrives already paid: this used to
         # create the row and then mark it paid separately, and a failure in
         # between left the expense unpaid while the tool reported an error
-        expense = store.create(
+        expense, package = store.create_submission(
             date=date or today_str(), amount=amount, description=description,
             category=category, submitted_by=submitted_by,
-            paid=paid, paid_date=paid_date,
+            paid=paid, paid_date=paid_date, course=course,
         )
         result = expense.to_dict()
+        result["package"] = package
         result["note"] = _summary_note() + _category_note(category)
         return result
 
@@ -410,7 +423,10 @@ def build_mcp(store: Store) -> FastMCP:
         was simply paid, use expenses_mark_paid instead; if money came back,
         expenses_refund. The audit history is kept. Target by query or
         expense_id. A payment that funds a course is refused until the course
-        is removed with classes_delete (the error names its package_id)."""
+        is removed with classes_delete (the error names its package_id).
+        For a dedicated class-fee category, confirm the whole correction first:
+        expenses_update(category='other'), then classes_delete, then expenses_delete.
+        To finish a real course, archive it with classes_update instead."""
         eid, ambiguous = _resolve(expense_id, query, prefer_unpaid=False)
         if ambiguous:
             return ambiguous
@@ -699,14 +715,14 @@ def build_mcp(store: Store) -> FastMCP:
         """Start tracking a prepaid course, FROM a payment already recorded.
         Use for: '足球课交了2200，10节课', 'paid for 10 football classes',
         '报了8月的课'. Target the payment by query (a word from its
-        description) or expense_id — record it with expenses_add FIRST if it is
-        not in the ledger yet. kind='per_class' for a pack of N classes drawn
+        description) or expense_id. For a NEW class fee use expenses_add with
+        category aden-edu-classes/aden-sports-classes AND course instead. kind='per_class' for a pack of N classes drawn
         down one at a time; kind='period' for a flat month/semester fee where
         MISSED classes are owed back. The per-class rate is derived from the
         payment (amount ÷ class_count) — do not pass a rate. period_label is
         free text like '8月' or '秋季学期'. NOTE: the portal's Classes tab can
-        only START a course from a payment categorised 'aden-edu' or
-        'aden-sports' — its add form lists no others. A course started HERE from
+        START a legacy course from untracked education/sports payments.
+        Dedicated class-fee payments already have their course. A course started HERE from
         any other category shows up in her tab normally and she can log classes
         against it, so there is nothing to correct; do not change a payment's
         category to make one appear."""
@@ -972,12 +988,14 @@ def build_mcp(store: Store) -> FastMCP:
         return (
             "You are the family bookkeeper (家庭记账员). The user will dictate "
             "expenses casually, possibly several in one message, Chinese or "
-            "English. For each: call expenses_add keeping their exact wording "
+            "English. For class fees, ask for course name/type/count and use the dedicated "
+            "class-fee category plus course in one expenses_add call. Equipment stays "
+            "separate. For each: call expenses_add keeping their exact wording "
             "as description; omit dates (defaults to today); pass amounts "
             "verbatim ('300块' is fine). If they said it's already paid, set "
             "paid=true. Confirm each item back in ONE short line in their "
             "language, ending with the unpaid total from the result's note. "
-            "Ask at most one question, and only if the amount is missing."
+            "Ask for any missing amount or required course details before adding a class fee."
             + (f"\n\nThe user said: {said}" if said else "")
         )
 

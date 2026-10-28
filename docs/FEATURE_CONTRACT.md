@@ -133,6 +133,34 @@ owed total a cent adrift from its own halves. Money is also capped at the
 payment: over-logging is reported as an `overrun` count, never as owing back
 more than was handed over. `rate` is a display figure only.
 
+### Required courses for class fees (v0.15.0)
+
+Dedicated categories `aden-edu-classes` (education class fees) and
+`aden-sports-classes` (sports class fees) require `course={name, kind,
+class_count, period_label?}` at expense creation, through BOTH portal and MCP.
+Name must be nonblank text, kind `per_class` or `period`, count a whole number
+1–1000. Period label is optional text. Unknown course fields are refused;
+there is no second amount or selectable funding expense. The saved expense's
+amount divided by class count determines the rate. Description is descriptive
+text, not a source for inferred counts. Paid status is independent of setup.
+
+The expense, course, `create` audit and `package_create` audit commit in ONE
+transaction; validation or any write failure leaves none of them. The author
+for both records comes from the existing authenticated attribution rules.
+The portal requires these fields in the same Add form, previews total/count,
+and confirms the server's saved course. The whole entry form is disabled during a pending submit; explicit
+validation refusals allow correction, but an uncertain network result requires
+reload and inspection before another submission.
+
+The broader `aden-edu` and `aden-sports` categories remain for equipment and
+other fees, with no required course. Existing expenses are not reclassified.
+`classes_add` remains available to attach historical untracked payments.
+Recategorizing an existing expense into a class-fee category requires an
+already linked course. Removing that course is refused while the expense is a
+class fee; archive it to finish a course, or correct a misclassified expense's
+category before deleting its tracker. Category edits and course deletion lock
+the same funding expense to preserve this rule under concurrent requests.
+
 ### `access_tokens`
 `id` PK, `token` TEXT UNIQUE (`secrets.token_hex(32)`), `label`,
 `expires_at` TEXT, `revoked` BOOLEAN DEFAULT FALSE, `created_at`,
@@ -180,7 +208,7 @@ portal page and the MCP mount.
 | endpoint | body (besides `token`) | effect |
 |---|---|---|
 | `/api/list` | `status?: all\|paid\|unpaid\|overdue, since?, until?` | matching expenses + **totals for exactly those rows** (`Store.summarize`) + `today` in `APP_TZ`, so the page never has to ask the device, **and `midnight_in`** (seconds left of that day) so a page left open rolls the date over AT midnight rather than 24h after the response |
-| `/api/submit` | `date, amount, currency?, category?, description?, submitted_by?` | insert + history(`create`) |
+| `/api/submit` | `date, amount, currency?, category?, description?, course?` | insert + history(`create`); class-fee categories require course and atomically add package + history(`package_create`); returns expense + saved package payload |
 | `/api/update` | `id, fields{date?,amount?,currency?,category?,description?,submitted_by?}, changed_by?` | update + history(`update`) |
 | `/api/mark-paid` | `id, paid, paid_date?, changed_by?` | set paid state + history(`mark_paid`/`unmark_paid`) |
 | `/api/delete` | `id, changed_by?` | delete + history(`delete`, pre-change snapshot) |
@@ -272,7 +300,7 @@ The nav order is Due · Classes · History · Stats.
   fetched when the tab is opened rather than on page load, and each fetch
   carries a generation number so a slow earlier response cannot repaint stale
   totals over fresh ones. Since v0.11.0: the payment dropdown offers only
-  `store.CLASS_CATEGORIES` (`aden-edu`, `aden-sports`) — a view filter, not a
+  `store.CLASS_CATEGORIES` (legacy education/sports and dedicated class-fee keys) — a view filter, not a
   money rule, since the store and MCP still link a package to any expense; a
   per-class pack is not asked for a period label; logging a class uses a date
   picker starting at the household's today, not a typed prompt; and removing a

@@ -106,6 +106,8 @@ CATEGORIES = (
     ("living",        "生活费",       "Living"),
     ("aden-edu",      "Aden 教育",    "Aden · education"),
     ("aden-sports",   "Aden 运动",    "Aden · sports"),
+    ("aden-edu-classes", "Aden 教育课费", "Aden · education class fees"),
+    ("aden-sports-classes", "Aden 运动课费", "Aden · sports class fees"),
     ("aden-clothes",  "Aden 衣服",    "Aden · clothes"),
     ("aden-other",    "Aden 其他",    "Aden · other"),
     ("food",          "食品",         "Food"),
@@ -144,17 +146,25 @@ _MISSED_EVENT_KINDS = ("missed_school", "missed_us")
 # one ceiling for "how many classes": the count on a package, and the size
 # of a batch logged in one call
 MAX_CLASS_COUNT = 1000
-# Which payments the Classes tab offers to link a course to. A view concern,
-# NOT a money rule: the store links a package to any expense and MCP
+# Which legacy payments the Classes tab offers for linking. This view filter
+# still allows older education/sports expenses; MCP can link other categories.
+# The separate dedicated class-fee keys below require atomic course creation.
+# The store links a package to any expense and MCP
 # `classes_add` still can, which is the escape hatch for a course paid under
 # some other key. The ledger carries a year of future-dated living-expense
 # rows, and date-ordered they buried the four payments that were actually
 # courses under twelve months of rent.
-CLASS_CATEGORIES = ("aden-edu", "aden-sports")
+CLASS_FEE_CATEGORIES = ("aden-edu-classes", "aden-sports-classes")
+CLASS_CATEGORIES = ("aden-edu", "aden-sports") + CLASS_FEE_CATEGORIES
 # category is nullable, and `category <> 'borrow'` is NULL (not true) for a NULL
 # category, which would silently drop uncategorised rows from every total.
 _NOT_BORROW = "COALESCE(category, '') <> 'borrow'"
 _IS_BORROW = "COALESCE(category, '') = 'borrow'"
+
+
+def requires_course(category: Optional[str]) -> bool:
+    """Dedicated class fees cannot exist without their funded course."""
+    return str(category or "").strip().lower() in CLASS_FEE_CATEGORIES
 
 
 def is_class_category(category: Optional[str]) -> bool:
@@ -559,15 +569,46 @@ class Store:
         category: Optional[str] = None, description: Optional[str] = None,
         submitted_by: Optional[str] = None,
         paid: bool = False, paid_date: Optional[str] = None,
+        course: Optional[dict[str, Any]] = None,
     ) -> Expense:
+        """Create an expense; callers needing the course use create_submission."""
+        expense, _package = self.create_submission(
+            date=date, amount=amount, currency=currency, category=category,
+            description=description, submitted_by=submitted_by, paid=paid,
+            paid_date=paid_date, course=course,
+        )
+        return expense
+
+    def create_submission(
+        self, *, date: str, amount: Any, currency: str = "CNY",
+        category: Optional[str] = None, description: Optional[str] = None,
+        submitted_by: Optional[str] = None,
+        paid: bool = False, paid_date: Optional[str] = None,
+        course: Optional[dict[str, Any]] = None,
+    ) -> tuple[Expense, Optional[dict[str, Any]]]:
         """Insert one expense, optionally already paid.
 
         ``paid`` exists so "昨天交了300的足球课" is a single transaction. The MCP
         used to create the row and then mark it paid in a second transaction: if
         the second failed, the row persisted as unpaid while the tool reported
         failure — the same-transaction history guarantee broken at the tool
-        boundary. One row in, one ``create`` history entry describing it.
+        boundary. A class-fee category also requires a course: both rows and
+        both audit entries share this transaction, including package failures.
         """
+        if requires_course(category):
+            if not isinstance(course, dict) or not course:
+                raise ValidationError(
+                    "class-fee category requires course: {name, kind, class_count, "
+                    "period_label?}. Expense and course must be saved together."
+                )
+            unknown = set(course) - {"name", "kind", "class_count", "period_label"}
+            if unknown:
+                raise ValidationError(f"unknown course fields: {sorted(unknown)}; "
+                                      "course money comes only from expense amount")
+            course = self._validate_course(**course)
+            category = str(category).strip().lower()
+        elif course is not None:
+            raise ValidationError("course requires category aden-edu-classes or aden-sports-classes")
         date = self._validate_date(date)
         amount = self._validate_amount(amount)
         currency = self._validate_currency(currency)
@@ -585,6 +626,7 @@ class Store:
             paid_date=paid_date, submitted_by=submitted_by,
             created_at=now, updated_at=now,
         )
+        package = None
         with self.db.tx() as tx:
             tx.execute(
                 "INSERT INTO expenses (id, date, amount, currency, category, description, "
@@ -596,7 +638,11 @@ class Store:
                 expense.column_values(),
             )
             self._write_history(tx, expense.id, "create", submitted_by, expense.to_dict())
-        return expense
+            if course is not None:
+                package = self._insert_package_in_tx(
+                    tx, generate_id(), expense.id, now=now, changed_by=submitted_by, **course,
+                )
+        return expense, package
 
     def update(
         self, expense_id: str, *, fields: dict[str, Any],
@@ -625,14 +671,20 @@ class Store:
         # keys validated against the frozenset above → safe to interpolate
         set_clause = ", ".join(f"{k} = :{k}" for k in clean)
         with self.db.tx() as tx:
-            if "amount" in clean:
-                # the floor below is a read-then-write against SUM(refunds);
-                # serialise it with a concurrent refund the same way refund()
-                # serialises with us (Postgres row lock; sqlite is serial)
+            if "amount" in clean or "category" in clean:
+                # Serialize refund floors and class-fee category changes with
+                # refund/course deletion (Postgres row lock; sqlite is serial).
                 self._lock_expense(tx, expense_id)
             current = self._fetch(tx, expense_id)
             if current is None:
                 raise NotFoundError(expense_id)
+            if "category" in clean and requires_course(clean["category"]):
+                if self._duplicate_package(tx, expense_id) is None:
+                    raise ValidationError(
+                        "class-fee category requires a course. Attach the existing payment "
+                        "using classes_add first, then change its category."
+                    )
+                clean["category"] = str(clean["category"]).strip().lower()
             if "amount" in clean:
                 # `amount` on a write is the GROSS figure — the one before
                 # refunds — because that is the number she typed and the one
@@ -701,6 +753,17 @@ class Store:
             self._write_history(tx, expense_id, action, changed_by, expense.to_dict())
         return expense
 
+    @staticmethod
+    def _required_course_cleanup() -> str:
+        return (
+            "课费必须保留课程；完成课程请选择“结课”。若整笔费用录错，确认后先编辑费用分类为“其他”，"
+            "再到课程页删除课程，最后删除费用。 "
+            "A class-fee expense must keep its course; archive a finished course. "
+            "For a mistaken fee, confirm the whole correction first, then "
+            "expenses_update(category='other'), classes_delete(package_id=…), "
+            "and expenses_delete(expense_id=…)."
+        )
+
     def delete(self, expense_id: str, *, changed_by: Optional[str] = None) -> bool:
         with self.db.tx() as tx:
             expense = self._fetch_expense(tx, expense_id)
@@ -718,6 +781,10 @@ class Store:
                 {"id": expense_id},
             )
             if package is not None:
+                if requires_course(expense.category):
+                    raise ValidationError(
+                        self._required_course_cleanup() + f" package_id={package['id']!r}"
+                    )
                 raise ValidationError(
                     f"this payment is tracked by the class package "
                     f"{package['name']!r} (package_id={package['id']!r}), which "
@@ -1380,6 +1447,15 @@ class Store:
         )
         return self._package_payload(row, events)
 
+    def _validate_course(self, *, name=None, kind=None, class_count=None, period_label=None):
+        if not isinstance(name, str) or not name.strip():
+            raise ValidationError("course name is required — e.g. 羽毛球 / Badminton")
+        if period_label is not None and not isinstance(period_label, str):
+            raise ValidationError("course period_label must be text")
+        return {"name": name.strip(), "kind": self._validate_class_kind(kind),
+                "class_count": self._validate_class_count(class_count),
+                "period_label": (period_label.strip() or None) if period_label else None}
+
     def create_package(
         self, *, expense_id: str, name: str, kind: str, class_count: Any,
         period_label: Optional[str] = None, changed_by: Optional[str] = None,
@@ -1389,13 +1465,10 @@ class Store:
         The payment must already exist in the ledger — that row is where the
         money lives, and this only records what it bought.
         """
-        kind = self._validate_class_kind(kind)
-        class_count = self._validate_class_count(class_count)
-        name = (str(name).strip() if name else "")
-        if not name:
-            raise ValidationError(
-                "name is required — what the course is, e.g. '足球课' or 'Football'"
-            )
+        fields = self._validate_course(name=name, kind=kind, class_count=class_count,
+                                       period_label=period_label)
+        name, kind, class_count, period_label = (fields[k] for k in
+                                               ("name", "kind", "class_count", "period_label"))
         now = _utc_now_iso()
         package_id = generate_id()
         try:
@@ -1428,48 +1501,56 @@ class Store:
         changed_by=None,
     ) -> dict[str, Any]:
         with self.db.tx() as tx:
-            expense = self._fetch(tx, str(expense_id))
-            if expense is None:
-                raise NotFoundError(expense_id)
-            existing = self._duplicate_package(tx, str(expense_id))
-            if existing is not None:
-                raise ValidationError(
-                    f"that payment is already tracked by the class package "
-                    f"{existing['name']!r} — one payment, one package, or the "
-                    "same money would be counted twice"
-                )
-            try:
-                tx.execute(
-                    "INSERT INTO class_packages (id, expense_id, name, kind, "
-                    "class_count, period_label, archived, created_at, updated_at) "
-                    "VALUES (:id, :expense_id, :name, :kind, :class_count, "
-                    ":period_label, :archived, :created_at, :updated_at)",
-                    {
-                        "id": package_id, "expense_id": str(expense_id), "name": name,
-                        "kind": kind, "class_count": class_count,
-                        "period_label": (str(period_label).strip() or None)
-                        if period_label else None,
-                        "archived": False, "created_at": now, "updated_at": now,
-                    },
-                )
-            except Exception as exc:
-                # The check above is not atomic with this insert, and since
-                # v0.9.0 the API handlers run in a threadpool — so two taps on
-                # "Add a course" can both pass it and a constraint becomes the
-                # thing that fires. Doing its job must not reach the caller as
-                # a 500 with a driver traceback.
-                if not _is_integrity_error(exc):
-                    raise
-                raise _ConstraintLost from exc
-            payload = self._package_in_tx(tx, package_id)
-            # the course's life is recorded under the payment that funds it:
-            # a package is 1:1 with its expense and never re-pointed, so the
-            # expense id is a stable key, and "what happened to this one" then
-            # answers for the course as well as for the money
-            self._write_history(
-                tx, str(expense_id), "package_create", changed_by,
-                self._package_snapshot(payload),
+            return self._insert_package_in_tx(
+                tx, package_id, expense_id, name, kind, class_count, period_label, now, changed_by,
             )
+
+    def _insert_package_in_tx(
+        self, tx, package_id, expense_id, name, kind, class_count, period_label, now,
+        changed_by=None,
+    ) -> dict[str, Any]:
+        expense = self._fetch(tx, str(expense_id))
+        if expense is None:
+            raise NotFoundError(expense_id)
+        existing = self._duplicate_package(tx, str(expense_id))
+        if existing is not None:
+            raise ValidationError(
+                f"that payment is already tracked by the class package "
+                f"{existing['name']!r} — one payment, one package, or the "
+                "same money would be counted twice"
+            )
+        try:
+            tx.execute(
+                "INSERT INTO class_packages (id, expense_id, name, kind, "
+                "class_count, period_label, archived, created_at, updated_at) "
+                "VALUES (:id, :expense_id, :name, :kind, :class_count, "
+                ":period_label, :archived, :created_at, :updated_at)",
+                {
+                    "id": package_id, "expense_id": str(expense_id), "name": name,
+                    "kind": kind, "class_count": class_count,
+                    "period_label": (str(period_label).strip() or None)
+                    if period_label else None,
+                    "archived": False, "created_at": now, "updated_at": now,
+                },
+            )
+        except Exception as exc:
+            # The check above is not atomic with this insert, and since
+            # v0.9.0 the API handlers run in a threadpool — so two taps on
+            # "Add a course" can both pass it and a constraint becomes the
+            # thing that fires. Doing its job must not reach the caller as
+            # a 500 with a driver traceback.
+            if not _is_integrity_error(exc):
+                raise
+            raise _ConstraintLost from exc
+        payload = self._package_in_tx(tx, package_id)
+        # the course's life is recorded under the payment that funds it:
+        # a package is 1:1 with its expense and never re-pointed, so the
+        # expense id is a stable key, and "what happened to this one" then
+        # answers for the course as well as for the money
+        self._write_history(
+            tx, str(expense_id), "package_create", changed_by,
+            self._package_snapshot(payload),
+        )
         return payload
 
     def package(self, package_id: str) -> dict[str, Any]:
@@ -1698,10 +1779,14 @@ class Store:
         this safe to offer from the MCP at all."""
         with self.db.tx() as tx:
             exists = tx.query_one(
-                "SELECT id FROM class_packages WHERE id = :id", {"id": str(package_id)}
+                "SELECT id, expense_id FROM class_packages WHERE id = :id", {"id": str(package_id)}
             )
             if exists is None:
                 return False
+            self._lock_expense(tx, exists["expense_id"])
+            expense = self._fetch(tx, exists["expense_id"])
+            if expense and requires_course(expense["category"]):
+                raise ValidationError(self._required_course_cleanup())
             payload = self._package_in_tx(tx, package_id)
             self._write_history(
                 tx, payload["expense_id"], "package_delete", changed_by,

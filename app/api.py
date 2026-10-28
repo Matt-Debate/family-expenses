@@ -114,15 +114,17 @@ def api_list(store: Store, body: dict) -> tuple[int, dict]:
 
 @_guard
 def api_submit(store: Store, body: dict) -> tuple[int, dict]:
-    expense = store.create(
+    expense, package = store.create_submission(
         date=body.get("date"),
         amount=body.get("amount"),
         currency=body.get("currency") or "CNY",
         category=body.get("category"),
         description=body.get("description"),
         submitted_by=_author(body, "submitted_by"),
+        course=body.get("course"),
     )
-    return 200, {"ok": True, "expense": expense.to_dict()}
+    return 200, {"ok": True, "expense": expense.to_dict(),
+                 "package": package}
 
 
 @_guard

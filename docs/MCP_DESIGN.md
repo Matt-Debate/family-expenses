@@ -26,7 +26,7 @@ edit lands where it has effect.
 | `expenses_help` | playbook-as-a-tool: works on clients that never surface `instructions`; description says "START HERE when unsure" — agents do call help tools when confused |
 | `expenses_list` | the one read for items AND totals ("我还要付什么", "花了多少"). A separate `expenses_summary` was **removed**: redundant read-only tools split selection probability and its output was already inside `list` |
 | `expenses_history` | disputes/troubleshooting ("谁改的") |
-| `expenses_add` | "足球课300块"; accepts already-paid in one call (paid=true) so "昨天交了300" isn't a two-step |
+| `expenses_add` | "足球课300块"; dedicated class-fee categories require `course={name,kind,class_count,period_label?}` and create expense + course atomically. Missing course facts must be requested, never inferred. Supports already-paid in the same transaction. |
 | `expenses_mark_paid` | "付了/交了/paid" — the highest-frequency write, so it gets fuzzy `query` targeting with unpaid-preference |
 | `expenses_update` | corrections ("改成350"); cannot touch paid — error redirects to mark_paid |
 | `expenses_delete` | mistakes only; destructive-flagged; description says confirm first and redirects "it's paid" to mark_paid |
@@ -91,3 +91,14 @@ insufficient-scope tool calls return MCP `isError` with `mcp/www_authenticate`
 metadata for consent/step-up without store access. Actual ChatGPT behavior
 remains a rollout gate.
 RUNBOOK §9 owns provider setup, pending resource-binding verification and migration.
+
+## Class-fee submission (v0.15.0)
+
+New education/sports class fees use `aden-edu-classes` / `aden-sports-classes`
+with the inline `course` object on `expenses_add`. Both records and audits save
+together, and the result includes the package payload captured inside that same transaction,
+including its period label and derived summary. No later package lookup is needed. The rate derives
+from expense amount / class count. Equipment and other fees stay in the original
+broad categories. `classes_add` is for existing untracked payments, including
+historical ones; it is not a second step after creating a new class fee.
+Deleting a required course is refused; finish it with archive instead.

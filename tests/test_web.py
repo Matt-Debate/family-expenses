@@ -321,7 +321,7 @@ class DocumentedCountsTests(unittest.TestCase):
     """
 
     ROOT = Path(__file__).resolve().parent.parent
-    LIVING = ("CLAUDE.md", "README.md", "docs/RUNBOOK.md")
+    LIVING = ("AGENTS.md", "README.md", "docs/RUNBOOK.md")
 
     def actual_test_count(self) -> int:
         return sum(
@@ -339,11 +339,11 @@ class DocumentedCountsTests(unittest.TestCase):
         self.assertTrue(lessons.exists(), "docs/LESSONS.md is gone")
         body = lessons.read_text(encoding="utf-8")
         self.assertGreater(len(body), 2000, "LESSONS.md has been emptied")
-        claude = (self.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("docs/LESSONS.md", claude,
-                      "CLAUDE.md no longer points at the lessons file")
+        agents = (self.ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("docs/LESSONS.md", agents,
+                      "AGENTS.md no longer points at the lessons file")
         # every entry must carry the failure as well as the rule; a file of
-        # bare rules is what CLAUDE.md already is
+        # bare rules is what AGENTS.md already is
         self.assertIn("**What happened.**", body)
         self.assertIn("**Rule.**", body)
         self.assertEqual(body.count("**What happened.**"), body.count("**Rule.**"),
@@ -410,8 +410,8 @@ class DocumentedCountsTests(unittest.TestCase):
     def test_documented_tool_count_matches_the_server(self):
         mcp_src = (self.ROOT / "app" / "mcp_server.py").read_text(encoding="utf-8")
         actual = mcp_src.count("@protected_tool(mcp,")
-        claude_md = (self.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn(f"{actual} tools", claude_md)
+        agents_md = (self.ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn(f"{actual} tools", agents_md)
 
 
 class ServerDecidesTodayTests(unittest.TestCase):
@@ -1892,7 +1892,7 @@ api("classes-log", {{}}).then(
 
     def test_a_server_refusal_is_marked_answered(self):
         result = self.call_api(
-            'function () { return Promise.resolve({ok: false, json: function () {'
+            'function () { return Promise.resolve({ok: false, status: 400, json: function () {'
             ' return Promise.resolve({ok: false, error: "bad date"}); }}); }')
         self.assertEqual(result["outcome"], "rejected")
         self.assertTrue(result["answered"], "a refusal the server sent is not in doubt")
@@ -1908,6 +1908,13 @@ api("classes-log", {{}}).then(
         self.assertEqual(result["outcome"], "rejected")
         self.assertTrue(result["answered"])
         self.assertEqual(result["msg"], "amount must be > 0")
+
+    def test_json_server_errors_leave_write_outcome_uncertain(self):
+        for status in (500, 502, 503, 504):
+            result = self.call_api(
+                'function () { return Promise.resolve({ok: false, status: ' + str(status) +
+                ', json: function () { return Promise.resolve({ok: false, error: "server error"}); }}); }')
+            self.assertFalse(result["answered"], "a server error does not prove rollback")
 
     def test_a_network_failure_is_not_marked_answered(self):
         """The whole point: this one may have committed."""
@@ -2021,6 +2028,7 @@ class ClassAddFormTests(unittest.TestCase):
             "would silently be the last of them, not the handler under test",
         )
         real = (src[src.index("  var STR = {"):src.index("  var lang =")]
+                + src[src.index("  function isClassFee("):src.index('  $("category").addEventListener("change", feeCourseFields)')]
                 + 'var lang = "zh";\n'
                 + src[src.index("  function money(n) {"):src.index("  function money0(n) {")]
                 + src[src.index("  function categoryLabel(e) {"):src.index("  function isBorrow(e) {")])
@@ -2225,7 +2233,7 @@ class ExpenseAddFormTests(ClassAddFormTests):
         400 would have cleared the form and toasted "added" with every test
         still passing — and she would have lost what she typed to a write that
         never happened."""
-        out = self.submit(dict(self.A_ROW), reject={"message": "amount must be positive"})
+        out = self.submit(dict(self.A_ROW), reject={"message": "amount must be positive", "answered": True})
         self.assertEqual(out["toasts"], ["amount must be positive"])
         self.assertEqual(out["refreshes"], 0)
         self.assertEqual(out["fields"]["amount"], "2200")

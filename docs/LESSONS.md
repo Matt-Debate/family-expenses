@@ -43,10 +43,12 @@ because that was the vocabulary the design handed them. A cross-model pass
 defect in the release that could move money — after three rounds had read the
 same lines.
 
-**Rule.** On money paths, a cross-model pass is a distinct gate, not a fourth
-round of the same thing. The owner runs it in both directions (Claude reviews
-Codex's work too). When reviewing, name your framing and then attack the frame,
-not only what sits inside it.
+**Rule.** Name your review framing and attack the frame, not only what sits
+inside it. The earlier mandatory cross-model gate is retired by the owner's
+2026-10-28 decision: Claude is unavailable; independent Codex review at an
+appropriate model/effort is the default. Cross-model review remains optional
+only on owner request. See AGENTS.md P8. The incident above remains evidence
+for independent review and real browser tests, not a requirement for Claude.
 
 ---
 

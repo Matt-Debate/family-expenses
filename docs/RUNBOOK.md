@@ -154,7 +154,7 @@ assistant asks which one — nothing is guessed silently.
 
 ```bash
 pip install -r requirements.lock
-python3 -m unittest discover -s tests        # 523 tests, sqlite, no server
+python3 -m unittest discover -s tests        # 542 tests, sqlite, no server
 python3 scripts/mint_link.py --label dev     # local sqlite file
 python3 -m app.main                          # http://localhost:8080
 ```
@@ -531,3 +531,17 @@ a credential the client has discarded. Do not restore anonymous MCP access.
 
 References: [refresh-token expiry](https://auth0.com/docs/secure/tokens/refresh-tokens/configure-refresh-token-expiration)
 and [offline access](https://auth0.com/docs/secure/tokens/refresh-tokens/get-refresh-tokens).
+
+## Class-fee category release (v0.15.0, prepared)
+
+No schema migration or historical data rewrite. The two new categories require
+course details in the same portal/MCP submission. Old pages and clients that
+submit a dedicated class-fee key without a course receive a validation refusal
+with neither record written. Broad education/sports categories retain their
+equipment/other-fee workflow. New fee creation, legacy linking, category edits
+and required-course deletion are covered offline. Refresh the portal to load
+the new form; no logout, new portal link or Auth0 change is required.
+
+This feature needs its own explicit deployment approval. Preserve the deployed
+v0.14.2 session fixes, existing service settings and secrets. After deploying,
+verify health and the served form without creating household test expenses.
