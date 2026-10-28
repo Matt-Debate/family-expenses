@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
@@ -190,6 +191,22 @@ def _auth_routes() -> list[Route]:
 SESSION_MAX_AGE_SECONDS = 400 * 24 * 60 * 60
 
 
+class RollingSessionMiddleware(SessionMiddleware):
+    """Renew existing sessions even when a route only reads them.
+
+    Starlette 1.7 writes cookies only for modified sessions. Touch through the
+    session's public mapping API after signature/age validation, before routing.
+    Empty/invalid sessions remain empty, and logout can still clear the session.
+    """
+    def __init__(self, app, **kwargs):
+        async def renew_session(scope, receive, send):
+            if scope["type"] == "http" and scope.get("session"):
+                scope["session"].update(dict(scope["session"]))
+            await app(scope, receive, send)
+
+        super().__init__(renew_session, **kwargs)
+
+
 def session_middleware():
     """Session middleware list — empty when OAuth is off.
 
@@ -199,11 +216,10 @@ def session_middleware():
     if not auth.is_enabled():
         return []
     from starlette.middleware import Middleware
-    from starlette.middleware.sessions import SessionMiddleware
 
     return [
         Middleware(
-            SessionMiddleware,
+            RollingSessionMiddleware,
             secret_key=auth.session_secret(),
             max_age=SESSION_MAX_AGE_SECONDS,
             https_only=True,

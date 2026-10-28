@@ -180,14 +180,19 @@ class SessionLifetimeTests(unittest.TestCase):
             request.session["seen"] = previous + 1
             return PlainTextResponse(str(previous))
 
-        return TestClient(Starlette(routes=[Route("/touch", touch)],
+        async def read(request):
+            return PlainTextResponse(str(request.session.get("seen", 0)))
+
+        return TestClient(Starlette(routes=[Route("/touch", touch), Route("/read", read)],
                                    middleware=session_middleware()),
                           base_url="https://testserver")
 
     def test_cookie_lives_400_days_and_rolls(self):
         with patch.dict("os.environ", ENABLED_ENV, clear=True), self.client() as client:
             first = client.get("/touch")
-            second = client.get("/touch")
+            # Ordinary portal reads do not change the session. Renewal must
+            # work on those too, including Starlette 1.7's modified-only cookies.
+            second = client.get("/read")
         self.assertEqual(second.text, "1")
         for response in (first, second):
             cookie = response.headers["set-cookie"]

@@ -1,9 +1,21 @@
 # Changelog — Family Expenses
 
+## v0.14.2 — Renew sessions on ordinary portal reads (2026-10-28)
+
+Live verification of v0.14.1 confirmed the 400-day cookie but caught missing
+renewal on read-only visits: pinned Starlette 1.7 persists only modified
+sessions. The original regression changed session data on both visits and
+therefore did not cover normal browsing. The corrected regression fails on a
+read-only second visit before this fix. A small session-middleware wrapper now
+touches an existing validated session before routing, renewing its cookie even
+when the page does not modify it; empty/invalid sessions and explicit logout
+retain their existing behavior. No credentials, expiry checks or login gates
+are changed.
+
 ## v0.14.1 — Long portal sessions and transient MCP authentication failures (2026-10-28)
 
-- Portal sessions last 400 days and roll on responses with session data,
-  replacing the production framework default of 14 days. Existing signing
+- Portal sessions last 400 days, replacing the production framework default
+  of 14 days. Ordinary-read renewal is corrected in v0.14.2. Existing signing
   secret, cookie name, login, allowlist and portal links are preserved.
 - An unavailable or unusable Auth0 signing-key response produces HTTP 503 with
   `Retry-After: 60`, without an OAuth challenge. The cooldown retains that

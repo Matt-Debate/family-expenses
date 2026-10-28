@@ -192,7 +192,9 @@ Notes that bite:
   TLS termination, which Auth0 rejects.
 - Rotating `SESSION_SECRET` signs everyone out.
 - Since v0.14.1, the portal cookie lasts 400 days and is renewed on responses
-  with session data. The deployed `/login` response must show
+  with modified session data. v0.14.2 explicitly renews unchanged sessions on
+  ordinary reads too; Starlette 1.7 no longer does that automatically.
+  The deployed `/login` response and a later read carrying that cookie must show
   `Max-Age=34560000`; report only that attribute, never the cookie value.
   The previous production revision used 14 days even though the original
   checkout contained an undeployed long-session change. Confirm runtime headers,
