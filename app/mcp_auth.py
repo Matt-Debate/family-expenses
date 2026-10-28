@@ -99,6 +99,10 @@ class AuthFailure(Exception):
         self.status, self.error, self.required = status, error, required
 
 
+class SigningKeysUnavailable(Exception):
+    """Provider failure prevents verification; it does not invalidate a login."""
+
+
 def authorize_tool(name: str) -> Principal:
     user = principal.get()
     if user is None:
@@ -187,6 +191,7 @@ class TokenVerifier:
         self._signing_keys = {}
         self._cache_until = 0
         self._last_attempt = float("-inf")
+        self._refresh_unavailable = False
         self._refresh_lock = anyio.Lock()
         # Isolate network work from the default portal/database worker limiter.
         self.jwks_limiter = anyio.CapacityLimiter(1)
@@ -207,20 +212,27 @@ class TokenVerifier:
             if now - self._last_attempt >= self.refresh_cooldown:
                 # Failed fetches also advance the cooldown; no per-kid memory.
                 self._last_attempt = now
-                data = await anyio.to_thread.run_sync(
-                    self.keys.fetch_data, limiter=self.jwks_limiter)
-                keyset = jwt.PyJWKSet.from_dict(data)
-                signing_keys = {
-                    key.key_id: key.key for key in keyset.keys
-                    if key.key_id and key.key_type == "RSA"
-                    and key.public_key_use in (None, "sig")
-                    and key.algorithm_name == "RS256"
-                }
-                if not signing_keys:
-                    raise AuthFailure()
+                self._refresh_unavailable = True
+                try:
+                    data = await anyio.to_thread.run_sync(
+                        self.keys.fetch_data, limiter=self.jwks_limiter)
+                    keyset = jwt.PyJWKSet.from_dict(data)
+                    signing_keys = {
+                        key.key_id: key.key for key in keyset.keys
+                        if key.key_id and key.key_type == "RSA"
+                        and key.public_key_use in (None, "sig")
+                        and key.algorithm_name == "RS256"
+                    }
+                    if not signing_keys:
+                        raise SigningKeysUnavailable()
+                except (jwt.PyJWTError, ValueError, TypeError, KeyError, OSError):
+                    raise SigningKeysUnavailable() from None
                 self._signing_keys = signing_keys
                 self._cache_until = self.clock() + self.cache_lifetime
+                self._refresh_unavailable = False
             if self.clock() >= self._cache_until or kid not in self._signing_keys:
+                if self._refresh_unavailable:
+                    raise SigningKeysUnavailable()
                 raise AuthFailure()
             return self._signing_keys[kid]
 
@@ -346,6 +358,14 @@ class McpBearerMiddleware:
                 return await self.app(scope, receive, send)
             finally:
                 principal.reset(context)
+        except SigningKeysUnavailable:
+            # No OAuth challenge: reauthentication cannot repair provider
+            # availability. Verification failed before any tool was dispatched.
+            return await JSONResponse(
+                {"error": "authentication_temporarily_unavailable"},
+                status_code=503,
+                headers={"Retry-After": "60", "Cache-Control": "no-store"},
+            )(scope, receive, send)
         except (AuthFailure, UnicodeError) as error:
             failure = error if isinstance(error, AuthFailure) else AuthFailure()
             challenge = self.challenge(failure)

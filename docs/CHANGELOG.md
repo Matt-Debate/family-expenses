@@ -1,5 +1,24 @@
 # Changelog — Family Expenses
 
+## v0.14.1 — Long portal sessions and transient MCP authentication failures (2026-10-28)
+
+- Portal sessions last 400 days and roll on responses with session data,
+  replacing the production framework default of 14 days. Existing signing
+  secret, cookie name, login, allowlist and portal links are preserved.
+- An unavailable or unusable Auth0 signing-key response produces HTTP 503 with
+  `Retry-After: 60`, without an OAuth challenge. The cooldown retains that
+  classification. Cached, unexpired known keys keep working; expired caches
+  still deny execution. Successful key refresh restores normal verification.
+  Invalid tokens and keys absent from a successfully refreshed key set still
+  receive 401. No expired token or stale signing key is accepted.
+- Offline regressions cover 365-day session acceptance, 401-day expiry,
+  cookie renewal, provider failure/cooldown/recovery and denial before writes.
+- Live Auth0 reads confirmed offline access and refresh-token grants enabled,
+  with non-expiring, non-rotating refresh tokens and both absolute/idle expiry
+  disabled. Short access-token lifetimes remain 900 seconds. Recent refreshes
+  succeeded; no Auth0 policy change was needed. This does not establish the
+  cause of the reported connector prompt or guarantee client credential storage.
+
 
 ## v0.14.0 — MCP OAuth resource server (2026-09-30, deployed)
 

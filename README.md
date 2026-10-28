@@ -37,7 +37,7 @@ Built to replace free-text WeChat messages — not a business system.
 
 ```bash
 pip install -r requirements.lock
-python3 -m unittest discover -s tests        # 519 tests, sqlite, no DB server
+python3 -m unittest discover -s tests        # 523 tests, sqlite, no DB server
 python3 -m app.main                          # http://localhost:8080
 python3 scripts/mint_link.py --label wife --base-url http://localhost:8080
 ```

@@ -167,10 +167,17 @@ class OAuthBoundaryTests(unittest.TestCase):
         self.assertEqual(self.client.post('/mcp', headers=headers, content='x'*1048577).status_code, 413)
 
     def test_jwks_outage_fails_closed(self):
-        with patch('jwt.PyJWKClient.fetch_data', side_effect=jwt.PyJWKClientConnectionError('sensitive')):
-            r=self.call('expenses_list')
-            self.assertEqual(r.status_code, 401)
-            self.assertNotIn('sensitive', r.text)
+        with patch('jwt.PyJWKClient.fetch_data', side_effect=jwt.PyJWKClientConnectionError('sensitive')) as fetch:
+            for _ in range(2):
+                r=self.call('expenses_add', {'amount':'10'})
+                self.assertEqual(r.status_code, 503)
+                self.assertEqual(r.json(), {'error':'authentication_temporarily_unavailable'})
+                self.assertNotIn('www-authenticate', r.headers)
+                self.assertEqual(r.headers['retry-after'], '60')
+                self.assertEqual(r.headers['cache-control'], 'no-store')
+                self.assertNotIn('sensitive', r.text)
+            self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(self.store.list(), [])
 
     def test_portal_and_health_unchanged(self):
         self.assertEqual(self.client.get('/health').status_code, 200)
@@ -226,8 +233,9 @@ class JwksRefreshTests(unittest.TestCase):
             verifier=TokenVerifier(CONFIG, clock=lambda: now[0])
             with offline_keys() as fetch:
                 async def reject(kid):
-                    with self.assertRaises(AuthFailure):
+                    with self.assertRaises(AuthFailure) as caught:
                         await verifier.verify(self.key_token(kid))
+                    self.assertEqual(caught.exception.status, 401)
                 async with anyio.create_task_group() as group:
                     for index in range(20): group.start_soon(reject, f'unknown-{index}')
                 self.assertEqual(fetch.call_count, 1)
@@ -244,6 +252,7 @@ class JwksRefreshTests(unittest.TestCase):
 
     def test_outage_retries_are_bounded_and_expired_cache_denied(self):
         import anyio
+        from app.mcp_auth import SigningKeysUnavailable
         async def exercise():
             now=[0.0]; verifier=TokenVerifier(CONFIG, clock=lambda:now[0])
             with offline_keys() as fetch:
@@ -251,12 +260,48 @@ class JwksRefreshTests(unittest.TestCase):
                 now[0]=301.0
                 fetch.side_effect=jwt.PyJWKClientConnectionError('sensitive')
                 for _ in range(10):
-                    with self.assertRaises(AuthFailure): await verifier.verify(token())
+                    with self.assertRaises(SigningKeysUnavailable): await verifier.verify(token())
                 self.assertEqual(fetch.call_count, 2)
                 now[0]=361.0
                 fetch.side_effect=None
                 await verifier.verify(token())
                 self.assertEqual(fetch.call_count, 3)
+        anyio.run(exercise)
+
+    def test_outage_keeps_unexpired_known_keys_and_recovers_without_login(self):
+        import anyio
+        from app.mcp_auth import SigningKeysUnavailable
+        async def exercise():
+            now=[0.0]; verifier=TokenVerifier(CONFIG, clock=lambda:now[0])
+            with offline_keys() as fetch:
+                await verifier.verify(token())
+                now[0]=60.0
+                fetch.side_effect=jwt.PyJWKClientConnectionError('sensitive')
+                with self.assertRaises(SigningKeysUnavailable):
+                    await verifier.verify(self.key_token('rotated'))
+                self.assertEqual((await verifier.verify(token())).subject, 'auth0|owner')
+                self.assertEqual(fetch.call_count, 2)
+                now[0]=120.0
+                fetch.side_effect=None
+                fetch.return_value['keys'][0]['kid']='rotated'
+                self.assertEqual((await verifier.verify(self.key_token('rotated'))).subject, 'auth0|owner')
+                self.assertEqual(fetch.call_count, 3)
+                with self.assertRaises(AuthFailure) as caught:
+                    await verifier.verify(self.key_token('unknown'))
+                self.assertEqual(caught.exception.status, 401)
+        anyio.run(exercise)
+
+    def test_malformed_provider_keys_are_unavailable_not_invalid_credentials(self):
+        import anyio
+        from app.mcp_auth import SigningKeysUnavailable
+        async def exercise():
+            for data in ({'keys': []}, {'keys': 'invalid'}):
+                verifier=TokenVerifier(CONFIG)
+                with patch('jwt.PyJWKClient.fetch_data', return_value=data) as fetch:
+                    for _ in range(2):
+                        with self.assertRaises(SigningKeysUnavailable):
+                            await verifier.verify(token())
+                    self.assertEqual(fetch.call_count, 1)
         anyio.run(exercise)
 
     def test_jwks_fetch_does_not_borrow_portal_worker_limiter(self):

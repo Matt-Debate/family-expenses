@@ -9,6 +9,7 @@ env vars unset, the portal behaves exactly as it did before OAuth existed.
 from __future__ import annotations
 
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +17,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from starlette.testclient import TestClient  # noqa: E402
+from starlette.applications import Starlette  # noqa: E402
+from starlette.responses import PlainTextResponse  # noqa: E402
+from starlette.routing import Route  # noqa: E402
 
 from app import auth  # noqa: E402
 from app.db import Database  # noqa: E402
@@ -163,6 +167,47 @@ class OpenRedirectTests(unittest.TestCase):
         from app.web import _safe_next
 
         self.assertEqual(_safe_next("/t/abc123"), "/t/abc123")
+
+
+class SessionLifetimeTests(unittest.TestCase):
+    DAYS = 24 * 60 * 60
+
+    def client(self):
+        from app.web import session_middleware
+
+        async def touch(request):
+            previous = request.session.get("seen", 0)
+            request.session["seen"] = previous + 1
+            return PlainTextResponse(str(previous))
+
+        return TestClient(Starlette(routes=[Route("/touch", touch)],
+                                   middleware=session_middleware()),
+                          base_url="https://testserver")
+
+    def test_cookie_lives_400_days_and_rolls(self):
+        with patch.dict("os.environ", ENABLED_ENV, clear=True), self.client() as client:
+            first = client.get("/touch")
+            second = client.get("/touch")
+        self.assertEqual(second.text, "1")
+        for response in (first, second):
+            cookie = response.headers["set-cookie"]
+            self.assertIn(f"Max-Age={400 * self.DAYS};", cookie)
+            self.assertIn("httponly", cookie.lower())
+            self.assertIn("secure", cookie.lower())
+            self.assertIn("samesite=lax", cookie.lower())
+
+    def test_signed_session_survives_a_year_but_not_401_days(self):
+        now = time.time()
+        for age_days, expected_previous in ((365, "1"), (401, "0")):
+            with self.subTest(age_days=age_days), patch.dict("os.environ", ENABLED_ENV, clear=True):
+                with self.client() as client:
+                    with patch("itsdangerous.timed.time.time", return_value=now - age_days * self.DAYS):
+                        old_cookie = client.get("/touch").cookies["session"]
+                # A new client simulates a later visit carrying the original
+                # signed cookie, without relying on a cookie jar's wall clock.
+                with self.client() as client:
+                    response = client.get("/touch", headers={"Cookie": f"session={old_cookie}"})
+                self.assertEqual(response.text, expected_previous)
 
 
 if __name__ == "__main__":

@@ -184,6 +184,12 @@ def _auth_routes() -> list[Route]:
     ]
 
 
+# Keep the household signed in for over a year, renewed on active responses.
+# Preserve the signing secret and cookie name so existing sessions remain valid.
+# A browser can still delete its cookie; this controls server expiry only.
+SESSION_MAX_AGE_SECONDS = 400 * 24 * 60 * 60
+
+
 def session_middleware():
     """Session middleware list — empty when OAuth is off.
 
@@ -199,6 +205,7 @@ def session_middleware():
         Middleware(
             SessionMiddleware,
             secret_key=auth.session_secret(),
+            max_age=SESSION_MAX_AGE_SECONDS,
             https_only=True,
             same_site="lax",  # must survive Auth0's cross-site redirect back
         )

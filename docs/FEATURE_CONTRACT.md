@@ -154,6 +154,12 @@ pattern, minus tenancy/scoping.
   Permission is the intersection of consented scopes, Auth0 RBAC permissions,
   and local member permissions. Portal cookies and MCP_SECRET cannot authorize
   MCP. Missing production security configuration prevents startup.
+- Portal sessions use a 400-day rolling signed cookie. Preserve its signing
+  secret and cookie name across deployments. Browser deletion, explicit logout
+  and revocation remain outside the server lifetime guarantee.
+- MCP signing-key provider outages deny execution with HTTP 503 and no login
+  challenge. They must not be reported as invalid user credentials. Successful
+  verification still requires a valid, unexpired token and current cached keys.
 
 ### 5.1 Compatibility contract (highest-priority invariant)
 The owner explicitly superseded the old no-auth MCP requirement on 2026-09-30

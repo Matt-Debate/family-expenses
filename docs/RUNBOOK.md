@@ -154,7 +154,7 @@ assistant asks which one — nothing is guessed silently.
 
 ```bash
 pip install -r requirements.lock
-python3 -m unittest discover -s tests        # 519 tests, sqlite, no server
+python3 -m unittest discover -s tests        # 523 tests, sqlite, no server
 python3 scripts/mint_link.py --label dev     # local sqlite file
 python3 -m app.main                          # http://localhost:8080
 ```
@@ -191,6 +191,13 @@ Notes that bite:
 - `PORTAL_BASE_URL` avoids a redirect_uri built as `http://` behind Cloud Run's
   TLS termination, which Auth0 rejects.
 - Rotating `SESSION_SECRET` signs everyone out.
+- Since v0.14.1, the portal cookie lasts 400 days and is renewed on responses
+  with session data. The deployed `/login` response must show
+  `Max-Age=34560000`; report only that attribute, never the cookie value.
+  The previous production revision used 14 days even though the original
+  checkout contained an undeployed long-session change. Confirm runtime headers,
+  not merely source. Browser cookie deletion and explicit logout still end a
+  session; preserving the secret avoids signing out existing browsers on deploy.
 - **Do not** use a Google social connection if she is in mainland China — it is
   blocked. Use an Auth0 database connection or email OTP.
 - Portal cookies do not authorize `/mcp`. Its independent OAuth access-token
@@ -247,7 +254,11 @@ PKCE verification, consent, authorization codes and token issuance.
   single worker permit independent of portal DB workers. Unknown keys and expired
   caches deny access; valid cached known keys keep working during the cooldown.
   Legitimate new signing keys may be denied for up to 60 seconds after the last
-  fetch; reconnect/retry after that interval rather than weakening validation.
+  fetch. Provider outages or unusable key responses return 503 with
+  `Retry-After: 60` and no `WWW-Authenticate` header, including during the
+  cooldown; recovery needs a later request, not another sign-in. This response
+  occurs before tool execution. A key absent from a successfully fetched set
+  still returns 401. Never weaken signature, expiry or audience validation.
 - Local missing config returns 503 on MCP while portal tests remain available.
   Cloud Run (`K_SERVICE`) with missing/invalid config refuses startup **before DB init**.
 
@@ -495,3 +506,26 @@ is pinned to an OCI manifest digest read from Docker's official registry on
 2026-09-30. Dependency changes require a fresh isolated install, full offline suite
 and review; no runtime lock can substitute for provider or deployment acceptance.
 The current log scrubber and tool-extension adapter are tested against this lock.
+
+
+### 9.6 One-year login continuity check (2026-10-28)
+
+The owner requested no automatic sign-out within a year for both the portal and
+MCP. These are independent lifetimes. Portal v0.14.1 uses a rolling 400-day
+session. The live MCP application already has `refresh_token` grant enabled,
+`expiration_type=non-expiring`, `rotation_type=non-rotating`,
+`infinite_token_lifetime=true` and `infinite_idle_token_lifetime=true`; the API
+has `allow_offline_access=true`. The finite numeric lifetime fields do not
+impose expiry while their infinite flags are enabled. No shared-client or tenant
+policy was changed. Access tokens remain short-lived (900 seconds) and must be
+renewed by the connector. Auth0 reports successful refresh exchanges today.
+
+For recurrence, check the exact connection and audience, refresh events and HTTP
+status before changing credentials. An enabled plugin does not prove an active
+connection. A temporary signing-key fetch failure must produce 503, not an OAuth
+invalid-token challenge. The backend cannot guarantee that ChatGPT retains its
+refresh token or a browser retains its cookie, and no backend change can restore
+a credential the client has discarded. Do not restore anonymous MCP access.
+
+References: [refresh-token expiry](https://auth0.com/docs/secure/tokens/refresh-tokens/configure-refresh-token-expiration)
+and [offline access](https://auth0.com/docs/secure/tokens/refresh-tokens/get-refresh-tokens).
