@@ -93,3 +93,14 @@ verification. They establish source/local acceptance, not production acceptance.
 Prepared locally, **not deployed**. Production remains v0.14.2 with the verified
 400-day rolling portal session fix. New feature deployment requires explicit
 owner approval after review and final verification.
+
+## Built release
+
+- Reviewed source: `262aa5a2098b5066864c78a58b294a558d83d10a` on
+  `codex/required-class-fees`, pushed to origin.
+- Cloud Build `31accb73-0833-433c-9577-1949a76a6742`: SUCCESS.
+- Immutable image:
+  `gcr.io/work-dashboards/family-expenses@sha256:90dfd493c3a89d150d1b768a65d0799ed3dfdb8d3e28f3a053a8520597a6e849`.
+- Ready for explicit deployment approval. Building/pushing the artifact did not
+  change the running Cloud Run service. The earlier owner approval covered the
+  already deployed authentication fix, not this later class-fee feature.
